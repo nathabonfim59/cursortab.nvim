@@ -537,6 +537,36 @@ func (b *IncrementalStageBuilder) finalizeCurrentStage() *Stage {
 	// AFTER the anchor line, so add 1 to get the insertion point.
 	if hasPureAdditionsOnly && olr.minOld > 0 {
 		bufferStart++
+	} else if !hasPureAdditionsOnly {
+		// Streaming may classify modifications as additions due to low similarity.
+		// After fallback matching in remapChanges, we may discover that additions are
+		// actually modifications of a different old line than the anchor. Recompute
+		// the old line range from the actual matched positions and re-remap.
+		correctedMinOld := -1
+		correctedMaxOld := -1
+		for _, change := range remappedChanges {
+			if change.Type == ChangeAddition || change.OldLineNum <= 0 {
+				continue
+			}
+			absOld := change.OldLineNum + olr.minOld - 1
+			if correctedMinOld == -1 || absOld < correctedMinOld {
+				correctedMinOld = absOld
+			}
+			if absOld > correctedMaxOld {
+				correctedMaxOld = absOld
+			}
+		}
+		if correctedMinOld > 0 && correctedMinOld != olr.minOld {
+			olr.minOld = correctedMinOld
+			olr.maxOld = max(olr.maxOld, correctedMaxOld)
+			startIdx := olr.minOld - 1
+			endIdx := olr.maxOld
+			if startIdx >= 0 && endIdx <= len(b.OldLines) {
+				olr.stageOldLines = b.OldLines[startIdx:endIdx]
+			}
+			bufferStart = olr.minOld + b.BaseLineOffset - 1
+			remappedChanges = b.remapChanges(stageNewLines, newStartLine, newEndLine, olr.minOld)
+		}
 	}
 
 	stage.BufferStart = bufferStart

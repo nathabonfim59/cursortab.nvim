@@ -2204,3 +2204,66 @@ func TestIncrementalStageBuilder_InsertedLineIsAddition(t *testing.T) {
 	assert.Equal(t, "addition", group.Type, "group type")
 	assert.Equal(t, []string{""}, group.Lines, "group lines")
 }
+
+// TestIncrementalStageBuilder_LowSimilarityModificationBufferRange verifies that when
+// a modification has very low similarity (e.g., printf() -> printf("very long args")),
+// the stage's BufferStart correctly points to the modified line, not the anchor line.
+//
+// During streaming, low-similarity modifications get classified as additions with an
+// anchor at the preceding line. The finalization remap step correctly identifies them
+// as modifications via fallback matching, but BufferStart must be recomputed from the
+// actual matched old line positions.
+func TestIncrementalStageBuilder_LowSimilarityModificationBufferRange(t *testing.T) {
+	oldLines := []string{
+		"#include \"header.h\"",
+		"",
+		"void func(int a,",
+		"          int b,",
+		"          int c) {",
+		"    printf()",
+		"",
+		"    return;",
+		"}",
+	}
+
+	builder := NewIncrementalStageBuilder(
+		oldLines,
+		1,    // baseLineOffset
+		3,    // proximityThreshold
+		0,    // maxVisibleLines
+		0, 0, // viewport disabled
+		6, 0, // cursor at the printf line
+		"test.c",
+	)
+
+	builder.AddLine(`#include "header.h"`)
+	builder.AddLine("")
+	builder.AddLine("void func(int a,")
+	builder.AddLine("          int b,")
+	builder.AddLine("          int c) {")
+	// Low-similarity modification: short line -> very long line
+	builder.AddLine(`    printf("signal=%p, n_samples=%zu, lead_idx=%d\n", signal, n_samples, lead_idx);`)
+	builder.AddLine("")
+	builder.AddLine("    return;")
+	builder.AddLine("}")
+
+	result := builder.Finalize()
+	assert.NotNil(t, result, "result should not be nil")
+	assert.Equal(t, 1, len(result.Stages), "should have 1 stage")
+
+	stage := result.Stages[0]
+	// BufferStart should be 6 (the printf line), not 5 (the anchor line before it)
+	assert.Equal(t, 6, stage.BufferStart,
+		"BufferStart should be at the modified line, not the preceding anchor")
+	assert.Equal(t, 6, stage.BufferEnd,
+		"BufferEnd should match for single-line modification")
+
+	assert.True(t, len(stage.Groups) > 0, "should have groups")
+	if len(stage.Groups) > 0 {
+		group := stage.Groups[0]
+		assert.Equal(t, 6, group.BufferLine,
+			"Group BufferLine should be at the modified line")
+		assert.Equal(t, "modification", group.Type,
+			"should be modification after fallback matching")
+	}
+}

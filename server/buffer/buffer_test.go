@@ -2,6 +2,7 @@ package buffer
 
 import (
 	"cursortab/assert"
+	"cursortab/text"
 	"cursortab/types"
 	"testing"
 )
@@ -236,4 +237,76 @@ func TestMakeRelativeToWorkspace(t *testing.T) {
 			assert.Equal(t, tt.want, got, "relative path mismatch")
 		})
 	}
+}
+
+// --- CommitPending Tests ---
+
+func TestCommitPending_PureInsertion(t *testing.T) {
+	buf := New(Config{NsID: 1})
+	buf.lines = []string{
+		"// 1: Bandpass filter",
+		"// 2: Differentiation",
+		"// 3: Derivative computation",
+		"// 4: Squaring and integration",
+		"// 5: Peak detection",
+	}
+	buf.originalLines = make([]string, len(buf.lines))
+	copy(buf.originalLines, buf.lines)
+
+	// Pure insertion at line 4: insert 2 new lines BEFORE "// 4: Squaring..."
+	// For pure insertions, EndLineInclusive = StartLine - 1 (no replacement)
+	buf.pending = &PendingEdit{
+		StartLine:        4,
+		EndLineInclusive: 3, // startLine - 1: means insert, don't replace
+		Lines:            []string{"double derivative[n_samples - 1];", "ecg_derivative(signal, derivative, n_samples);"},
+	}
+
+	buf.CommitPending()
+
+	// The existing line "// 4: Squaring and integration" must be preserved
+	assert.Equal(t, 7, len(buf.lines), "should have 7 lines (5 original + 2 inserted)")
+	assert.Equal(t, "// 3: Derivative computation", buf.lines[2], "line 3 unchanged")
+	assert.Equal(t, "double derivative[n_samples - 1];", buf.lines[3], "inserted line 1")
+	assert.Equal(t, "ecg_derivative(signal, derivative, n_samples);", buf.lines[4], "inserted line 2")
+	assert.Equal(t, "// 4: Squaring and integration", buf.lines[5], "original line 4 preserved")
+	assert.Equal(t, "// 5: Peak detection", buf.lines[6], "original line 5 preserved")
+}
+
+func TestCommitPending_Replacement(t *testing.T) {
+	buf := New(Config{NsID: 1})
+	buf.lines = []string{"line 1", "old line 2", "line 3"}
+	buf.originalLines = make([]string, len(buf.lines))
+	copy(buf.originalLines, buf.lines)
+
+	buf.pending = &PendingEdit{
+		StartLine:        2,
+		EndLineInclusive: 2,
+		Lines:            []string{"new line 2"},
+	}
+
+	buf.CommitPending()
+
+	assert.Equal(t, 3, len(buf.lines), "should still have 3 lines")
+	assert.Equal(t, "new line 2", buf.lines[1], "line 2 replaced")
+}
+
+// --- isPureInsertion Tests ---
+
+func TestIsPureInsertion(t *testing.T) {
+	assert.True(t, isPureInsertion([]*text.Group{
+		{Type: "addition"},
+		{Type: "addition"},
+	}), "all addition groups")
+
+	assert.False(t, isPureInsertion([]*text.Group{
+		{Type: "modification"},
+	}), "modification group")
+
+	assert.False(t, isPureInsertion([]*text.Group{
+		{Type: "addition"},
+		{Type: "modification"},
+	}), "mixed groups")
+
+	assert.False(t, isPureInsertion([]*text.Group{}), "empty groups")
+	assert.False(t, isPureInsertion(nil), "nil groups")
 }

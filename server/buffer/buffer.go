@@ -289,7 +289,7 @@ func (b *NvimBuffer) PrepareCompletion(startLine, endLineInc int, lines []string
 
 	// Groups are pre-computed by staging with BufferLine already set
 
-	applyBatch := b.getApplyBatch(startLine, endLineInc, lines, diffResult)
+	applyBatch := b.getApplyBatch(startLine, endLineInc, lines, diffResult, isPureInsertion(groups))
 
 	// Convert to Lua format
 	luaDiffResult := diffResultToLuaFormat(diffResult, groups, lines, startLine)
@@ -727,7 +727,21 @@ func (b *NvimBuffer) getDiffResult(startLine, endLineInclusive int, lines []stri
 	return text.ComputeDiff(oldText, newText)
 }
 
-func (b *NvimBuffer) getApplyBatch(startLine, endLineInclusive int, lines []string, diffResult *text.DiffResult) *nvim.Batch {
+// isPureInsertion returns true if all groups are additions (no modifications or deletions).
+// Pure insertion stages insert content without replacing existing lines.
+func isPureInsertion(groups []*text.Group) bool {
+	if len(groups) == 0 {
+		return false
+	}
+	for _, g := range groups {
+		if g.Type != "addition" {
+			return false
+		}
+	}
+	return true
+}
+
+func (b *NvimBuffer) getApplyBatch(startLine, endLineInclusive int, lines []string, diffResult *text.DiffResult, isInsertion bool) *nvim.Batch {
 	// Create apply batch for the completion
 	applyBatch := b.client.NewBatch()
 
@@ -738,24 +752,35 @@ func (b *NvimBuffer) getApplyBatch(startLine, endLineInclusive int, lines []stri
 		placeBytes[i] = []byte(line)
 	}
 
-	// execute lua to actually clear the lines within the range beforehand
-	applyBatch.ExecLua(fmt.Sprintf("vim.cmd('normal! %v,%vd')", startLine, endLineInclusive), nil, nil)
+	if isInsertion {
+		// Pure insertion: insert new lines without replacing existing content.
+		// SetBufferLines with start == end inserts at that position.
+		applyBatch.SetBufferLines(b.id, startLine-1, startLine-1, false, placeBytes)
 
-	applyBatch.SetBufferLines(b.id, startLine-1, endLineInclusive, false, placeBytes)
+		// EndLineInclusive = startLine - 1 signals to CommitPending that no
+		// existing lines are being replaced (the replacement range is empty).
+		b.pending = &PendingEdit{
+			StartLine:        startLine,
+			EndLineInclusive: startLine - 1,
+			Lines:            append([]string{}, lines...),
+		}
+	} else {
+		// Replacement: clear existing lines then place new content
+		applyBatch.ExecLua(fmt.Sprintf("vim.cmd('normal! %v,%vd')", startLine, endLineInclusive), nil, nil)
+		applyBatch.SetBufferLines(b.id, startLine-1, endLineInclusive, false, placeBytes)
+
+		b.pending = &PendingEdit{
+			StartLine:        startLine,
+			EndLineInclusive: endLineInclusive,
+			Lines:            append([]string{}, lines...),
+		}
+	}
 
 	// Apply cursor positioning from diff changes
 	cursorLine, cursorCol := text.CalculateCursorPosition(diffResult.Changes, lines)
 	if cursorLine >= 0 && cursorCol >= 0 {
-		// Convert from diff line numbers (relative to new text) to buffer line numbers
 		bufferLine := startLine + cursorLine - 1
 		applyCursorMove(applyBatch, bufferLine, cursorCol, false, true)
-	}
-
-	// Mark as pending; actual commit happens on accept
-	b.pending = &PendingEdit{
-		StartLine:        startLine,
-		EndLineInclusive: endLineInclusive,
-		Lines:            append([]string{}, lines...),
 	}
 
 	return applyBatch

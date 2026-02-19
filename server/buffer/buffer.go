@@ -742,7 +742,6 @@ func isPureInsertion(groups []*text.Group) bool {
 }
 
 func (b *NvimBuffer) getApplyBatch(startLine, endLineInclusive int, lines []string, diffResult *text.DiffResult, isInsertion bool) *nvim.Batch {
-	// Create apply batch for the completion
 	applyBatch := b.client.NewBatch()
 
 	b.clearNamespace(applyBatch, b.config.NsID)
@@ -752,28 +751,21 @@ func (b *NvimBuffer) getApplyBatch(startLine, endLineInclusive int, lines []stri
 		placeBytes[i] = []byte(line)
 	}
 
+	// nvim_buf_set_lines uses 0-indexed [start, end) range.
+	// Replacement: 1-indexed inclusive [startLine, endLineInclusive] maps to
+	// 0-indexed exclusive [startLine-1, endLineInclusive) by indexing coincidence.
+	// Pure insertion: start == end inserts without replacing any existing lines.
+	replaceEnd := endLineInclusive
 	if isInsertion {
-		// Pure insertion: insert new lines without replacing existing content.
-		// SetBufferLines with start == end inserts at that position.
-		applyBatch.SetBufferLines(b.id, startLine-1, startLine-1, false, placeBytes)
+		replaceEnd = startLine - 1
+	}
 
-		// EndLineInclusive = startLine - 1 signals to CommitPending that no
-		// existing lines are being replaced (the replacement range is empty).
-		b.pending = &PendingEdit{
-			StartLine:        startLine,
-			EndLineInclusive: startLine - 1,
-			Lines:            append([]string{}, lines...),
-		}
-	} else {
-		// Replacement: clear existing lines then place new content
-		applyBatch.ExecLua(fmt.Sprintf("vim.cmd('normal! %v,%vd')", startLine, endLineInclusive), nil, nil)
-		applyBatch.SetBufferLines(b.id, startLine-1, endLineInclusive, false, placeBytes)
+	applyBatch.SetBufferLines(b.id, startLine-1, replaceEnd, false, placeBytes)
 
-		b.pending = &PendingEdit{
-			StartLine:        startLine,
-			EndLineInclusive: endLineInclusive,
-			Lines:            append([]string{}, lines...),
-		}
+	b.pending = &PendingEdit{
+		StartLine:        startLine,
+		EndLineInclusive: replaceEnd,
+		Lines:            append([]string{}, lines...),
 	}
 
 	// Apply cursor positioning from diff changes

@@ -1115,7 +1115,7 @@ func TestDiffWithMixedLineEndings(t *testing.T) {
 func TestDiffVeryLongFile(t *testing.T) {
 	// Create a large file
 	var lines1, lines2 []string
-	for i := 0; i < 500; i++ {
+	for i := range 500 {
 		lines1 = append(lines1, fmt.Sprintf("line %d content here", i+1))
 		lines2 = append(lines2, fmt.Sprintf("line %d content here", i+1))
 	}

@@ -528,7 +528,7 @@ pre { font-family: 'JetBrains Mono', monospace; font-size: 13px; margin: 0; }
 	var totalFixtures, allPass, statusFailed, statusUnverified int
 	for _, f := range fixtures {
 		totalFixtures++
-		if !f.BatchPass || !f.IncrementalPass || !f.ApplyPass {
+		if !f.BatchPass || !f.IncrementalPass || !f.ApplyPass || !f.PartialAcceptPass {
 			statusFailed++
 		} else if !f.Verified {
 			statusUnverified++
@@ -569,21 +569,25 @@ pre { font-family: 'JetBrains Mono', monospace; font-size: 13px; margin: 0; }
 		if !f.ApplyPass {
 			aStatus = `<span class="fail">apply:FAIL</span>`
 		}
+		pStatus := `<span class="pass">partial:pass</span>`
+		if !f.PartialAcceptPass {
+			pStatus = `<span class="fail">partial:FAIL</span>`
+		}
 		vStatus := `<span class="pass">verified</span>`
 		if !f.Verified {
 			vStatus = `<span class="unverified">unverified</span>`
 		}
 
-		allPass := f.BatchPass && f.IncrementalPass && f.ApplyPass && f.Verified
+		allPass := f.BatchPass && f.IncrementalPass && f.ApplyPass && f.PartialAcceptPass && f.Verified
 		escapedName := html.EscapeString(f.Name)
 		status := "passed"
-		if !f.BatchPass || !f.IncrementalPass || !f.ApplyPass {
+		if !f.BatchPass || !f.IncrementalPass || !f.ApplyPass || !f.PartialAcceptPass {
 			status = "failed"
 		} else if !f.Verified {
 			status = "unverified"
 		}
-		fmt.Fprintf(&b, "<details class=\"fixture\" data-status=\"%s\" open>\n<summary class=\"hdr\"><h2>%s</h2><button class=\"copy-btn\" data-name=\"%s\" onclick=\"navigator.clipboard.writeText(this.dataset.name)\">copy</button> %s %s %s %s <span class=\"meta\">cursor=(%d,%d) vp=[%d,%d]</span></summary>\n",
-			status, escapedName, escapedName, vStatus, bStatus, iStatus, aStatus,
+		fmt.Fprintf(&b, "<details class=\"fixture\" data-status=\"%s\" open>\n<summary class=\"hdr\"><h2>%s</h2><button class=\"copy-btn\" data-name=\"%s\" onclick=\"navigator.clipboard.writeText(this.dataset.name)\">copy</button> %s %s %s %s %s <span class=\"meta\">cursor=(%d,%d) vp=[%d,%d]</span></summary>\n",
+			status, escapedName, escapedName, vStatus, bStatus, iStatus, aStatus, pStatus,
 			f.Params.CursorRow, f.Params.CursorCol,
 			f.Params.ViewportTop, f.Params.ViewportBottom)
 
@@ -596,6 +600,15 @@ pre { font-family: 'JetBrains Mono', monospace; font-size: 13px; margin: 0; }
 			b.WriteString("<div class=\"apply-section\">\n")
 			b.WriteString("<div class=\"cols-2\">\n")
 			renderTextPane(&b, "Applied (got)", f.ApplyLines, 0, -1)
+			renderTextPane(&b, "Expected (new.txt)", strings.Split(f.NewText, "\n"), 0, -1)
+			b.WriteString("</div>\n")
+			b.WriteString("</div>\n")
+		}
+
+		if !f.PartialAcceptPass && len(f.PartialAcceptLines) > 0 {
+			b.WriteString("<div class=\"apply-section\">\n")
+			b.WriteString("<div class=\"cols-2\">\n")
+			renderTextPane(&b, "Partial Accept (got)", f.PartialAcceptLines, 0, -1)
 			renderTextPane(&b, "Expected (new.txt)", strings.Split(f.NewText, "\n"), 0, -1)
 			b.WriteString("</div>\n")
 			b.WriteString("</div>\n")

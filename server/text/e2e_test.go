@@ -39,18 +39,20 @@ type fixtureParams struct {
 }
 
 type fixtureResult struct {
-	Name              string
-	OldText           string
-	NewText           string
-	Params            fixtureParams
-	Expected          []map[string]any
-	BatchActual       []map[string]any
-	IncrementalActual []map[string]any
-	BatchPass         bool
-	IncrementalPass   bool
-	ApplyPass         bool
-	ApplyLines        []string
-	Verified          bool
+	Name               string
+	OldText            string
+	NewText            string
+	Params             fixtureParams
+	Expected           []map[string]any
+	BatchActual        []map[string]any
+	IncrementalActual  []map[string]any
+	BatchPass          bool
+	IncrementalPass    bool
+	ApplyPass          bool
+	ApplyLines         []string
+	PartialAcceptPass  bool
+	PartialAcceptLines []string
+	Verified           bool
 }
 
 // stageIsPureInsertion checks if a stage is a pure insertion (insert without
@@ -96,6 +98,98 @@ func (b *testBuffer) applyStage(stage *Stage) {
 			newLines = append(newLines, b.lines[end:]...)
 		}
 		b.lines = newLines
+	}
+}
+
+// partialAcceptStage simulates Ctrl+Right partial acceptance for a stage.
+// Mirrors the engine's partialAcceptCompletion → rerenderPartial loop.
+// Stages with deletions fall back to full apply since partial accept cannot
+// delete lines (the user would press Tab instead of Ctrl+Right).
+func (b *testBuffer) partialAcceptStage(stage *Stage) {
+	// Partial accept only works for same-line-count modifications and append_chars.
+	// Stages that add or remove lines require full batch apply (Tab).
+	isPureInsertion := stageIsPureInsertion(stage)
+	var oldLineCount int
+	if isPureInsertion {
+		oldLineCount = 0
+	} else {
+		oldLineCount = stage.BufferEnd - stage.BufferStart + 1
+	}
+	if len(stage.Lines) != oldLineCount {
+		b.applyStage(stage)
+		return
+	}
+
+	startLine := stage.BufferStart
+	completionLines := append([]string{}, stage.Lines...)
+	groups := make([]*Group, len(stage.Groups))
+	for i, g := range stage.Groups {
+		cp := *g
+		groups[i] = &cp
+	}
+
+	maxIter := len(completionLines)*20 + 100
+	for iter := 0; iter < maxIter && len(completionLines) > 0 && len(groups) > 0; iter++ {
+		firstGroup := groups[0]
+
+		if firstGroup.RenderHint == "append_chars" {
+			lineIdx := firstGroup.BufferLine - 1
+			if lineIdx < 0 || lineIdx >= len(b.lines) {
+				break
+			}
+			currentLine := b.lines[lineIdx]
+			targetLine := completionLines[0]
+
+			if len(currentLine) >= len(targetLine) {
+				if len(completionLines) <= 1 {
+					return
+				}
+				completionLines = completionLines[1:]
+				startLine++
+			} else {
+				remainingGhost := targetLine[len(currentLine):]
+				acceptLen := FindNextWordBoundary(remainingGhost)
+				b.lines[lineIdx] = currentLine + remainingGhost[:acceptLen]
+
+				if len(b.lines[lineIdx]) >= len(targetLine) {
+					if len(completionLines) <= 1 {
+						return
+					}
+					completionLines = completionLines[1:]
+					startLine++
+				}
+			}
+		} else {
+			firstLine := completionLines[0]
+			if startLine > len(b.lines) {
+				newLines := make([]string, 0, len(b.lines)+1)
+				newLines = append(newLines, b.lines[:startLine-1]...)
+				newLines = append(newLines, firstLine)
+				newLines = append(newLines, b.lines[startLine-1:]...)
+				b.lines = newLines
+			} else {
+				b.lines[startLine-1] = firstLine
+			}
+
+			if len(completionLines) <= 1 {
+				return
+			}
+			completionLines = completionLines[1:]
+			startLine++
+		}
+
+		// Recompute diff and groups (mirrors rerenderPartial)
+		endLineInc := startLine + len(completionLines) - 1
+		var originalLines []string
+		for i := startLine; i <= endLineInc && i-1 < len(b.lines); i++ {
+			originalLines = append(originalLines, b.lines[i-1])
+		}
+
+		diffResult := ComputeDiff(JoinLines(originalLines), JoinLines(completionLines))
+		groups = GroupChanges(diffResult.Changes)
+		for _, g := range groups {
+			g.BufferLine = startLine + g.StartLine - 1
+		}
 	}
 }
 
@@ -272,6 +366,32 @@ func TestE2E(t *testing.T) {
 				}
 			}
 
+			// --- Partial accept verification ---
+			partialAcceptPass := true
+			var partialAcceptLines []string
+			if batchResult != nil && len(batchResult.Stages) > 0 {
+				buf := &testBuffer{lines: append([]string{}, oldLines...)}
+				stageCopies := make([]*Stage, len(batchResult.Stages))
+				for i, s := range batchResult.Stages {
+					cp := *s
+					cp.Groups = make([]*Group, len(s.Groups))
+					for j, g := range s.Groups {
+						gCopy := *g
+						cp.Groups[j] = &gCopy
+					}
+					stageCopies[i] = &cp
+				}
+				for i := range stageCopies {
+					buf.partialAcceptStage(stageCopies[i])
+					advanceOffsets(stageCopies, i)
+				}
+				partialAcceptLines = buf.lines
+				if !slicesEqual(partialAcceptLines, newLines) {
+					partialAcceptPass = false
+					t.Errorf("partial accept result mismatch:\n  got:  %v\n  want: %v", partialAcceptLines, newLines)
+				}
+			}
+
 			// --- Update or compare ---
 			expectedPath := filepath.Join(dir, "expected.json")
 
@@ -316,18 +436,20 @@ func TestE2E(t *testing.T) {
 			}
 
 			fr := fixtureResult{
-				Name:              name,
-				OldText:           string(oldBytes),
-				NewText:           string(newBytes),
-				Params:            params,
-				Expected:          expected,
-				BatchActual:       batchLua,
-				IncrementalActual: incLua,
-				BatchPass:         batchJSON == expectedJSON,
-				IncrementalPass:   incJSON == expectedJSON,
-				ApplyPass:         applyPass,
-				ApplyLines:        applyLines,
-				Verified:          verified,
+				Name:               name,
+				OldText:            string(oldBytes),
+				NewText:            string(newBytes),
+				Params:             params,
+				Expected:           expected,
+				BatchActual:        batchLua,
+				IncrementalActual:  incLua,
+				BatchPass:          batchJSON == expectedJSON,
+				IncrementalPass:    incJSON == expectedJSON,
+				ApplyPass:          applyPass,
+				ApplyLines:         applyLines,
+				PartialAcceptPass:  partialAcceptPass,
+				PartialAcceptLines: partialAcceptLines,
+				Verified:           verified,
 			}
 			fixtures = append(fixtures, fr)
 

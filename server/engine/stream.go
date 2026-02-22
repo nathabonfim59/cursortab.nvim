@@ -24,10 +24,14 @@ func (e *Engine) requestStreamingCompletion(provider LineStreamProvider, req *ty
 	}
 
 	// Get old lines for incremental diff building.
-	// Extract trim info from provider context if available.
+	// StreamContext (FIM) takes priority — provides cursor-relative old lines.
+	// TrimmedContext is the default for full-file replacement providers.
 	windowStart := 0
 	var oldLines []string
-	if tc, ok := providerCtx.(TrimmedContext); ok && len(tc.GetTrimmedLines()) > 0 {
+	if sc, ok := providerCtx.(StreamContext); ok && sc.GetStreamOldLines() != nil {
+		windowStart = sc.GetStreamBaseOffset()
+		oldLines = sc.GetStreamOldLines()
+	} else if tc, ok := providerCtx.(TrimmedContext); ok && len(tc.GetTrimmedLines()) > 0 {
 		// Provider trimmed the content - use trimmed lines and offset
 		windowStart = tc.GetWindowStart()
 		oldLines = tc.GetTrimmedLines()
@@ -195,8 +199,15 @@ func (e *Engine) handleStreamLine(line string) {
 		}
 	}
 
-	// Buffer current line (will be processed on next line or completion)
-	ss.PendingLine = line
+	// Buffer current line (will be processed on next line or completion).
+	// For FIM streams, transform the first line by prepending the cursor prefix.
+	pendingLine := line
+	if !ss.HasPendingLine {
+		if sc, ok := ss.ProviderContext.(StreamContext); ok && sc.GetStreamOldLines() != nil {
+			pendingLine = sc.TransformFirstLine(pendingLine)
+		}
+	}
+	ss.PendingLine = pendingLine
 	ss.HasPendingLine = true
 }
 
@@ -225,9 +236,14 @@ func (e *Engine) handleStreamCompleteSimple() {
 
 	firstStageRendered := ss.FirstStageRendered
 
-	// Process pending line if not truncated
+	// Process pending line if not truncated.
+	// For FIM streams, transform the last line by appending the cursor suffix.
 	if ss.HasPendingLine {
-		ss.StageBuilder.AddLine(ss.PendingLine)
+		lastLine := ss.PendingLine
+		if sc, ok := ss.ProviderContext.(StreamContext); ok && sc.GetStreamOldLines() != nil {
+			lastLine = sc.TransformLastLine(lastLine)
+		}
+		ss.StageBuilder.AddLine(lastLine)
 		ss.HasPendingLine = false
 	}
 

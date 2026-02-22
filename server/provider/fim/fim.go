@@ -28,6 +28,7 @@ func NewProvider(config *types.ProviderConfig) *provider.Provider {
 		StreamingType: provider.StreamingLines,
 		Preprocessors: []provider.Preprocessor{
 			provider.TrimContent(),
+			setStreamContext(),
 		},
 		PromptBuilder: buildPrompt,
 		Postprocessors: []provider.Postprocessor{
@@ -35,6 +36,26 @@ func NewProvider(config *types.ProviderConfig) *provider.Provider {
 			provider.DropLastLineIfTruncated(),
 			parseCompletion,
 		},
+	}
+}
+
+// setStreamContext configures streaming diff context for FIM.
+// The streamed lines are raw middle-fill text; this tells the engine how to
+// transform them into full replacement lines and what old lines to diff against.
+func setStreamContext() provider.Preprocessor {
+	return func(p *provider.Provider, ctx *provider.Context) error {
+		if len(ctx.TrimmedLines) == 0 || ctx.CursorLine >= len(ctx.TrimmedLines) {
+			return nil
+		}
+
+		currentLine := ctx.TrimmedLines[ctx.CursorLine]
+		cursorCol := min(ctx.Request.CursorCol, len(currentLine))
+
+		ctx.StreamOldLines = ctx.TrimmedLines[ctx.CursorLine:]
+		ctx.StreamBaseOff = ctx.WindowStart + ctx.CursorLine
+		ctx.FirstLinePfx = currentLine[:cursorCol]
+		ctx.LastLineSfx = currentLine[cursorCol:]
+		return nil
 	}
 }
 

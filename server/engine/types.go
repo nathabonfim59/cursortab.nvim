@@ -149,6 +149,17 @@ type TrimmedContext interface {
 	GetTrimmedLines() []string // Lines sent to the model (nil if no trimming)
 }
 
+// StreamContext provides custom old lines and line transforms for streaming.
+// Used by FIM providers where streamed lines are partial (middle-fill) and need
+// transformation before diffing. When implemented, the engine uses these old lines
+// and base offset instead of TrimmedContext, and transforms the first/last lines.
+type StreamContext interface {
+	GetStreamOldLines() []string           // old lines for diff (nil = not applicable)
+	GetStreamBaseOffset() int              // 0-indexed base offset in buffer
+	TransformFirstLine(line string) string // transform first streamed line
+	TransformLastLine(line string) string  // transform last streamed line
+}
+
 // StreamingState holds state during incremental line streaming
 type StreamingState struct {
 	// Stage building

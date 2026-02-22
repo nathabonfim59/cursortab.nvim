@@ -54,6 +54,12 @@ type Context struct {
 
 	// Streaming state
 	CompletionRequest *openai.CompletionRequest // Built request for streaming
+
+	// Stream context for FIM-style providers (implements engine.StreamContext)
+	StreamOldLines []string // custom old lines for streaming diff (nil = not applicable)
+	StreamBaseOff  int      // 0-indexed base offset in buffer
+	FirstLinePfx   string   // prefix to prepend to first streamed line
+	LastLineSfx    string   // suffix to append to last streamed line
 }
 
 // GetWindowStart returns the 0-indexed start offset of the trimmed window.
@@ -66,6 +72,30 @@ func (c *Context) GetWindowStart() int {
 // Implements engine.TrimmedContext interface.
 func (c *Context) GetTrimmedLines() []string {
 	return c.TrimmedLines
+}
+
+// GetStreamOldLines returns custom old lines for streaming diff.
+// Implements engine.StreamContext interface.
+func (c *Context) GetStreamOldLines() []string {
+	return c.StreamOldLines
+}
+
+// GetStreamBaseOffset returns the 0-indexed base offset in buffer.
+// Implements engine.StreamContext interface.
+func (c *Context) GetStreamBaseOffset() int {
+	return c.StreamBaseOff
+}
+
+// TransformFirstLine prepends the stored prefix to the first streamed line.
+// Implements engine.StreamContext interface.
+func (c *Context) TransformFirstLine(line string) string {
+	return c.FirstLinePfx + line
+}
+
+// TransformLastLine appends the stored suffix to the last streamed line.
+// Implements engine.StreamContext interface.
+func (c *Context) TransformLastLine(line string) string {
+	return line + c.LastLineSfx
 }
 
 // Provider implements engine.Provider with a configurable pipeline

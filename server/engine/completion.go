@@ -52,7 +52,7 @@ func (e *Engine) handleTextChangeImpl() {
 	matches, hasRemaining := e.checkTypingMatchesPrediction()
 	if matches {
 		if hasRemaining {
-			// Typing matches - keep completion state
+			e.processCompletion(e.completions[0])
 			return
 		}
 		// User typed everything - completion fully typed
@@ -280,7 +280,8 @@ func (e *Engine) processCompletion(completion *types.Completion) bool {
 
 	bufferLines := e.buffer.Lines()
 	var originalLines []string
-	for i := completion.StartLine; i <= completion.EndLineInc && i-1 < len(bufferLines); i++ {
+	endLine := max(completion.EndLineInc, completion.StartLine+len(completion.Lines)-1)
+	for i := completion.StartLine; i <= endLine && i-1 < len(bufferLines); i++ {
 		originalLines = append(originalLines, bufferLines[i-1])
 	}
 

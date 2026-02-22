@@ -328,7 +328,8 @@ func (e *Engine) handleStreamCompleteAfterAccept(ss *StreamingState) {
 
 	// Extract old lines (current buffer content in the completion range)
 	var oldLines []string
-	for i := comp.StartLine; i <= comp.EndLineInc && i-1 < len(bufferLines); i++ {
+	endLine := max(comp.EndLineInc, comp.StartLine+len(comp.Lines)-1)
+	for i := comp.StartLine; i <= endLine && i-1 < len(bufferLines); i++ {
 		oldLines = append(oldLines, bufferLines[i-1])
 	}
 

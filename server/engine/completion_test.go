@@ -3,6 +3,7 @@ package engine
 import (
 	"cursortab/assert"
 	"cursortab/types"
+	"fmt"
 	"testing"
 )
 
@@ -157,4 +158,59 @@ func TestHandleCursorTarget_FarAway(t *testing.T) {
 
 	assert.Equal(t, stateHasCursorTarget, eng.state, "state when far away")
 	assert.Equal(t, 10, buf.showCursorTargetLine, "showCursorTargetLine")
+}
+
+// TestProcessCompletion_NoSpuriousAdditions tests that processCompletion does not show
+// already-existing buffer lines as additions when a FIM completion's Lines span beyond EndLineInc.
+//
+// This reproduces the FIM provider bug where, after accepting a first streaming stage
+// (which inserts lines below the cursor), a follow-up completion uses EndLineInc=CursorRow
+// to extract originalLines. Because those newly-accepted lines are not included in
+// originalLines, ComputeDiff treats them as additions, duplicating content already in the buffer.
+func TestProcessCompletion_NoSpuriousAdditions(t *testing.T) {
+	buf := newMockBuffer()
+	// Buffer after first FIM accept: 6 lines total
+	buf.lines = []string{
+		"import numpy as np",
+		"",
+		"def bubble_sort(arr):",
+		"    n = len(arr)",
+		"    for i in range(n):",
+		"        for j in range(0, n - i - 1):",
+	}
+	buf.row = 5 // cursor at line 5 (moved after first accept)
+	buf.col = 23
+	buf.viewportTop = 1
+	buf.viewportBottom = 20
+	prov := newMockProvider()
+	clock := newMockClock()
+	eng := createTestEngine(buf, prov, clock)
+
+	// Completion from FIM: StartLine=EndLineInc=3 (original cursor row), but Lines
+	// spans lines 3-9 — including lines 4-6 that were already accepted into the buffer.
+	comp := &types.Completion{
+		StartLine:  3,
+		EndLineInc: 3,
+		Lines: []string{
+			"def bubble_sort(arr):",
+			"    n = len(arr)",
+			"    for i in range(n):",
+			"        for j in range(0, n - i - 1):",
+			"            if arr[j] > arr[j + 1]:",
+			"                arr[j], arr[j + 1] = arr[j + 1], arr[j]",
+			"    return arr",
+		},
+	}
+
+	result := eng.processCompletion(comp)
+	assert.True(t, result, "processCompletion should show remaining changes")
+
+	if eng.stagedCompletion != nil && len(eng.stagedCompletion.Stages) > 0 {
+		for _, stage := range eng.stagedCompletion.Stages {
+			for _, g := range stage.Groups {
+				assert.True(t, g.BufferLine > 6,
+					fmt.Sprintf("should not show already-accepted buffer lines 1-6 as changes, got %q at buffer_line %d", g.Type, g.BufferLine))
+			}
+		}
+	}
 }

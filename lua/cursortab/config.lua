@@ -5,7 +5,12 @@
 ---@field text string
 ---@field show_distance boolean
 
+---@class CursortabUICompletionsConfig
+---@field addition_style string "dimmed" or "highlight"
+---@field fg_opacity number opacity for completion overlays (0=invisible, 1=fully visible)
+
 ---@class CursortabUIConfig
+---@field completions CursortabUICompletionsConfig
 ---@field jump CursortabUIJumpConfig
 
 ---@class CursortabCursorPredictionConfig
@@ -78,6 +83,10 @@ local default_config = {
 	},
 
 	ui = {
+		completions = {
+			addition_style = "dimmed", -- "dimmed" or "highlight"
+			fg_opacity = 0.6, -- opacity for completion overlays (0=invisible, 1=fully visible)
+		},
 		jump = {
 			symbol = "",
 			text = " TAB ",
@@ -250,6 +259,7 @@ end
 -- Valid values for enum-like config options
 local valid_provider_types = { inline = true, fim = true, sweep = true, sweepapi = true, zeta = true, copilot = true, mercuryapi = true }
 local valid_log_levels = { trace = true, debug = true, info = true, warn = true, error = true }
+local valid_addition_styles = { dimmed = true, highlight = true }
 
 -- Validate that all keys in user config exist in default config
 ---@param user_cfg table User configuration
@@ -299,6 +309,24 @@ local function validate_config(cfg)
 			"[cursortab.nvim] Invalid log_level '%s'. Must be one of: trace, debug, info, warn, error",
 			cfg.log_level
 		))
+	end
+
+	-- Validate addition style
+	if cfg.ui and cfg.ui.completions and cfg.ui.completions.addition_style then
+		if not valid_addition_styles[cfg.ui.completions.addition_style] then
+			error(string.format(
+				"[cursortab.nvim] Invalid ui.completions.addition_style '%s'. Must be one of: dimmed, highlight",
+				cfg.ui.completions.addition_style
+			))
+		end
+	end
+
+	-- Validate fg_opacity
+	if cfg.ui and cfg.ui.completions and cfg.ui.completions.fg_opacity then
+		local f = cfg.ui.completions.fg_opacity
+		if type(f) ~= "number" or f < 0 or f > 1 then
+			error("[cursortab.nvim] ui.completions.fg_opacity must be a number between 0 and 1")
+		end
 	end
 
 	-- Validate numeric ranges

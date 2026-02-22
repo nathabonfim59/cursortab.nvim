@@ -158,9 +158,12 @@ func (b *NvimBuffer) Sync(workspacePath string) (*SyncResult, error) {
 		return view.leftcol or 0
 	`, &scrollOffset, nil)
 
-	// Get vertical viewport bounds (first and last visible line numbers, 1-indexed)
+	// Get vertical viewport bounds (first and last potentially visible line, 1-indexed).
+	// Use window height instead of w$ so that short files still report the full
+	// visible area (w$ only returns the last line with content).
 	batch.ExecLua(`
-		return {vim.fn.line("w0"), vim.fn.line("w$")}
+		local top = vim.fn.line("w0")
+		return {top, top + vim.api.nvim_win_get_height(0) - 1}
 	`, &viewportBounds, nil)
 
 	if err := batch.Execute(); err != nil {
@@ -292,7 +295,11 @@ func (b *NvimBuffer) PrepareCompletion(startLine, endLineInc int, lines []string
 	applyBatch := b.getApplyBatch(startLine, endLineInc, lines, diffResult, isPureInsertion(groups))
 
 	// Convert to Lua format
-	luaDiffResult := diffResultToLuaFormat(diffResult, groups, lines, startLine)
+	luaDiffResult := text.ToLuaFormat(&text.Stage{
+		Changes: diffResult.Changes,
+		Groups:  groups,
+		Lines:   lines,
+	}, startLine)
 
 	// Debug logging for data sent to Lua
 	if jsonData, err := json.Marshal(luaDiffResult); err == nil {
@@ -780,41 +787,6 @@ func (b *NvimBuffer) getApplyBatch(startLine, endLineInclusive int, lines []stri
 
 func (b *NvimBuffer) clearNamespace(batch *nvim.Batch, nsID int) {
 	batch.ClearBufferNamespace(b.id, nsID, 0, -1)
-}
-
-// diffResultToLuaFormat converts diff result and groups to a format suitable for Lua rendering
-func diffResultToLuaFormat(diffResult *text.DiffResult, groups []*text.Group, newLines []string, startLine int) map[string]any {
-	// Compute cursor position
-	cursorLine, cursorCol := text.CalculateCursorPosition(diffResult.Changes, newLines)
-
-	// Build groups array for Lua
-	var luaGroups []map[string]any
-	for _, g := range groups {
-		luaGroup := map[string]any{
-			"type":        g.Type,
-			"start_line":  g.StartLine,
-			"end_line":    g.EndLine,
-			"buffer_line": g.BufferLine,
-			"lines":       g.Lines,
-			"old_lines":   g.OldLines,
-		}
-
-		// Add render hint for character-level optimizations
-		if g.RenderHint != "" {
-			luaGroup["render_hint"] = g.RenderHint
-			luaGroup["col_start"] = g.ColStart
-			luaGroup["col_end"] = g.ColEnd
-		}
-
-		luaGroups = append(luaGroups, luaGroup)
-	}
-
-	return map[string]any{
-		"startLine":   startLine,
-		"groups":      luaGroups,
-		"cursor_line": cursorLine,
-		"cursor_col":  cursorCol,
-	}
 }
 
 // CopilotClientInfo contains information about an attached Copilot LSP client

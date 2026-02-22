@@ -106,15 +106,39 @@ type LineMapping struct {
 // GetBufferLine calculates the buffer line for a change using coordinate mapping.
 // mapKey is the change's key in the changes map (typically newLineNum).
 // baseLineOffset is where the diff range starts in the buffer (1-indexed).
+//
+// For additions, the returned value is the insertion point (where virt_lines_above
+// should render), NOT the anchor line. This means:
+//   - If OldLineNum is set (anchor = line before insertion): returns anchor + 1
+//   - If backward walk finds a mapped line: returns that line + 1
+//   - If forward walk finds a mapped line: returns that line (insert before it)
 func (m *LineMapping) GetBufferLine(change LineChange, mapKey, baseLineOffset int) int {
+	isAddition := change.Type == ChangeAddition
+
 	if change.OldLineNum > 0 {
-		return change.OldLineNum + baseLineOffset - 1
+		bufLine := change.OldLineNum + baseLineOffset - 1
+		if isAddition {
+			bufLine++
+		}
+		return bufLine
 	}
 
 	if m != nil && change.NewLineNum > 0 && change.NewLineNum <= len(m.NewToOld) {
 		oldLine := m.NewToOld[change.NewLineNum-1]
 		if oldLine > 0 {
 			return oldLine + baseLineOffset - 1
+		}
+		if isAddition {
+			// For additions, find the nearest mapped old line to determine
+			// the buffer insertion point.
+			// Forward walk: addition goes just before the next old line.
+			for i := change.NewLineNum; i < len(m.NewToOld); i++ {
+				if m.NewToOld[i] > 0 {
+					return m.NewToOld[i] + baseLineOffset - 1
+				}
+			}
+			// No forward match: addition is past the last old line.
+			return len(m.OldToNew) + baseLineOffset
 		}
 		for i := change.NewLineNum - 2; i >= 0; i-- {
 			if m.NewToOld[i] > 0 {
@@ -174,6 +198,10 @@ func (r *DiffResult) addChange(oldLineNum, newLineNum int, oldContent, newConten
 		// Note: For deletions, the deleted content is stored in Content field
 		if existing.Type == ChangeDeletion && changeType == ChangeAddition {
 			deletedContent := existing.Content // Deletion stores content in Content field
+			// If the addition is empty, keep the deletion as-is
+			if newContent == "" {
+				return false
+			}
 			changeType, colStart, colEnd = categorizeLineChangeWithColumns(deletedContent, newContent)
 			oldContent = deletedContent
 			// Merge coordinates: take oldLineNum from existing deletion
@@ -249,6 +277,19 @@ func ComputeDiff(text1, text2 string) *DiffResult {
 		Changes:      make(map[int]LineChange),
 		OldLineCount: oldLineCount,
 		NewLineCount: newLineCount,
+	}
+
+	// When old text is a single empty line, the diff library may match it as
+	// "equal" to an interior empty line in the new text, producing pure additions
+	// instead of a modification at line 1. Force a delete+insert so the collision
+	// logic in addChange merges them into a modification (append_chars).
+	if oldLineCount == 1 && oldLines[0] == "" && newLineCount > 0 {
+		lineDiffs := []diffmatchpatch.Diff{
+			{Type: diffmatchpatch.DiffDelete, Text: text1},
+			{Type: diffmatchpatch.DiffInsert, Text: text2},
+		}
+		result.LineMapping = processLineDiffsWithMapping(lineDiffs, result, oldLineCount, newLineCount)
+		return result
 	}
 
 	dmp := diffmatchpatch.New()
@@ -365,7 +406,9 @@ func processLineDiffsWithMapping(lineDiffs []diffmatchpatch.Diff, result *DiffRe
 					// Find the anchor point in new text (the line before deletion, or -1)
 					anchorNew := -1
 					if newLineNum > 0 {
-						anchorNew = newLineNum // Point to line before (will be used as insertion anchor)
+						anchorNew = newLineNum
+					} else if newLineCount > 0 {
+						anchorNew = 1
 					}
 					result.addDeletion(oldIdx+1, anchorNew, line)
 				}
@@ -436,13 +479,35 @@ func handleModificationsWithMapping(deletedLines, insertedLines []string,
 	usedInserts := make(map[int]bool)
 	usedDeletes := make(map[int]bool)
 
-	// First pass: Match similar non-empty lines with similarity threshold
 	matches := make(map[int]int) // maps deleted index to inserted index
 
+	// First pass: Prefix matching (deleted line is a prefix of inserted line).
+	// This catches cases like "partial" → "partial content completed" where
+	// Levenshtein similarity is below threshold but the match is unambiguous.
 	for i, deletedLine := range deletedLines {
-		if deletedLine == "" {
+		if usedDeletes[i] || deletedLine == "" || strings.TrimSpace(deletedLine) == "" {
 			continue
 		}
+		trimmed := strings.TrimRight(deletedLine, " \t")
+		for j, insertedLine := range insertedLines {
+			if usedInserts[j] {
+				continue
+			}
+			if strings.HasPrefix(insertedLine, trimmed) {
+				matches[i] = j
+				usedInserts[j] = true
+				usedDeletes[i] = true
+				break
+			}
+		}
+	}
+
+	// Second pass: Match similar non-empty lines with similarity threshold
+	for i, deletedLine := range deletedLines {
+		if usedDeletes[i] || deletedLine == "" || strings.TrimSpace(deletedLine) == "" {
+			continue
+		}
+
 		bestIdx, bestSimilarity := findBestMatch(deletedLine, insertedLines, usedInserts)
 		if bestIdx != -1 && bestSimilarity >= SimilarityThreshold {
 			matches[i] = bestIdx
@@ -451,7 +516,7 @@ func handleModificationsWithMapping(deletedLines, insertedLines []string,
 		}
 	}
 
-	// Second pass: Process matched pairs as modifications and update mapping
+	// Third pass: Process matched pairs as modifications and update mapping
 	for delIdx, insIdx := range matches {
 		oldIdx := oldLineStart + delIdx
 		newIdx := newLineStart + insIdx
@@ -467,7 +532,7 @@ func handleModificationsWithMapping(deletedLines, insertedLines []string,
 		result.addModification(oldIdx+1, newIdx+1, deletedLines[delIdx], insertedLines[insIdx])
 	}
 
-	// Third pass: Handle unmatched deletions (oldToNew stays -1)
+	// Fourth pass: Handle unmatched deletions (oldToNew stays -1)
 	for i, deletedLine := range deletedLines {
 		if usedDeletes[i] {
 			continue
@@ -481,18 +546,25 @@ func handleModificationsWithMapping(deletedLines, insertedLines []string,
 		result.addDeletion(oldIdx+1, anchorNew, deletedLine)
 	}
 
-	// Fourth pass: Handle unmatched additions (newToOld stays -1)
+	// Fifth pass: Handle unmatched additions (newToOld stays -1)
+	// For each unmatched addition, find the nearest preceding matched insert
+	// to determine the correct anchor. Additions before any match have no anchor
+	// (anchorOld=-1), so GetBufferLine will use the forward walk to find the
+	// correct insertion point. Additions after a match anchor to the matched
+	// old line, placing them after it.
 	for i, insertedLine := range insertedLines {
 		if usedInserts[i] {
 			continue
 		}
 		newIdx := newLineStart + i
-		// Anchor to the first deleted line position (1-indexed) so that additions
-		// have the same buffer line as their related modifications during viewport
-		// partitioning. This ensures delete+insert blocks stay grouped together.
 		anchorOld := -1
-		if oldLineStart >= 0 {
-			anchorOld = oldLineStart + 1 // Use 1-indexed position of first deleted line
+		for delIdx, insIdx := range matches {
+			if insIdx < i {
+				candidate := oldLineStart + delIdx + 1 // 1-indexed
+				if candidate > anchorOld {
+					anchorOld = candidate
+				}
+			}
 		}
 		result.addAddition(anchorOld, newIdx+1, insertedLine)
 	}
@@ -589,6 +661,21 @@ func categorizePureDeletion(diffs []diffmatchpatch.Diff) (ChangeType, int, int) 
 func categorizeSingleReplacement(diffs []diffmatchpatch.Diff, deletedText, insertedText string) (ChangeType, int, int) {
 	// Check if this is a complex modification based on word count heuristics
 	if isComplexModification(deletedText, insertedText) {
+		return ChangeModification, 0, 0
+	}
+
+	// The delete and insert must be adjacent for replace_chars to accurately
+	// represent the change. If there's an Equal segment between them, the changes
+	// are at different positions and can't be shown as a single replacement span.
+	adjacent := false
+	for i := 0; i < len(diffs)-1; i++ {
+		if (diffs[i].Type == diffmatchpatch.DiffDelete && diffs[i+1].Type == diffmatchpatch.DiffInsert) ||
+			(diffs[i].Type == diffmatchpatch.DiffInsert && diffs[i+1].Type == diffmatchpatch.DiffDelete) {
+			adjacent = true
+			break
+		}
+	}
+	if !adjacent {
 		return ChangeModification, 0, 0
 	}
 

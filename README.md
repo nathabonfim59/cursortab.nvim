@@ -1,7 +1,6 @@
 # cursortab.nvim
 
 A Neovim plugin that provides local edit completions and cursor predictions.
-Currently supports custom models and models form Zeta (Zed) and SweepAI.
 
 > [!WARNING]
 >

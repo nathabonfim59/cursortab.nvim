@@ -1991,6 +1991,95 @@ func TestIncrementalStageBuilder_InsertedLineIsAddition(t *testing.T) {
 // anchor at the preceding line. The finalization remap step correctly identifies them
 // as modifications via fallback matching, but BufferStart must be recomputed from the
 // actual matched old line positions.
+// TestIncrementalStageBuilder_BlankLineInsertionsBetweenFunctions verifies that
+// inserting blank lines between function definitions produces only addition groups,
+// not spurious deletions. Reproduces a bug where the intermediate stage during
+// streaming showed a deletion of an unrelated line (e.g. print(calculate_min_max))
+// because findOldLineRange only captured old lines between the nearest anchors,
+// missing the fact that lines further down were just shifted, not deleted.
+func TestIncrementalStageBuilder_BlankLineInsertionsBetweenFunctions(t *testing.T) {
+	oldLines := []string{
+		"import numpy as np",                    // 1
+		"",                                      // 2
+		"",                                      // 3
+		"def calculate_mean(data):",             // 4
+		"    return np.mean(data)",              // 5
+		"",                                      // 6
+		"",                                      // 7
+		"def calculate_min_max(data):",          // 8
+		"    return np.min(data), np.max(data)", // 9
+		"def calculate_var(data):",              // 10
+		"    return np.var(data)",               // 11
+		"if __name__ == \"__main__\":",          // 12
+		"    data = np.array([1, 2, 3, 4, 5])",  // 13
+		"    print(calculate_mean(data))",       // 14
+		"    print(calculate_min_max(data))",    // 15
+		"    print(calculate_var(data))",        // 16
+	}
+
+	builder := NewIncrementalStageBuilder(
+		oldLines,
+		1,     // baseLineOffset
+		3,     // proximityThreshold
+		4,     // maxVisibleLines
+		1, 50, // viewport
+		10, 0, // cursorRow, cursorCol
+		"test.py",
+	)
+
+	// Stream all new lines (model adds 2 blank lines before each def/if block)
+	newLines := []string{
+		"import numpy as np",
+		"",
+		"",
+		"def calculate_mean(data):",
+		"    return np.mean(data)",
+		"",
+		"",
+		"def calculate_min_max(data):",
+		"    return np.min(data), np.max(data)",
+		"", // added blank line
+		"", // added blank line
+		"def calculate_var(data):",
+		"    return np.var(data)",
+		"", // added blank line
+		"", // added blank line
+		"if __name__ == \"__main__\":",
+		"    data = np.array([1, 2, 3, 4, 5])",
+		"    print(calculate_mean(data))",
+		"    print(calculate_min_max(data))",
+		"    print(calculate_var(data))",
+	}
+
+	var intermediateStages []*Stage
+	for _, line := range newLines {
+		if stage := builder.AddLine(line); stage != nil {
+			intermediateStages = append(intermediateStages, stage)
+		}
+	}
+
+	// Verify intermediate stages have no deletions
+	for i, stage := range intermediateStages {
+		for _, group := range stage.Groups {
+			assert.NotEqual(t, "deletion", group.Type,
+				fmt.Sprintf("intermediate stage %d should have no deletion groups, got deletion at buffer_line %d with lines %v",
+					i, group.BufferLine, group.Lines))
+		}
+	}
+
+	result := builder.Finalize()
+	assert.NotNil(t, result, "result should not be nil")
+
+	// Verify the finalized (batch) result has no deletions
+	for _, stage := range result.Stages {
+		for _, group := range stage.Groups {
+			assert.NotEqual(t, "deletion", group.Type,
+				fmt.Sprintf("finalized stage should have no deletion groups, got deletion at buffer_line %d with lines %v",
+					group.BufferLine, group.Lines))
+		}
+	}
+}
+
 func TestIncrementalStageBuilder_LowSimilarityModificationBufferRange(t *testing.T) {
 	oldLines := []string{
 		"#include \"header.h\"",

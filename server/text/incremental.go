@@ -285,7 +285,16 @@ func (b *IncrementalStageBuilder) findOldLineRange(startNewLine, endNewLine int)
 	if anchorAfter > 0 {
 		maxOld = anchorAfter - 1
 	} else {
-		maxOld = len(b.OldLines)
+		// No forward anchor (mid-stream finalization). Use the highest old line
+		// matched within the stage's new line range instead of the entire file.
+		for i := startNewLine - 1; i < endNewLine && i < len(mapping); i++ {
+			if mapping[i] > 0 && mapping[i] > maxOld {
+				maxOld = mapping[i]
+			}
+		}
+		if maxOld == -1 {
+			maxOld = len(b.OldLines)
+		}
 	}
 
 	// Clamp

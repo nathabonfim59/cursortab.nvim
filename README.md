@@ -570,7 +570,7 @@ the best experience:
 2. Decrease `provider.max_tokens` to reduce output length (also limits input
    context)
 
-The `github` provider is known to be slower than the rest.
+The `copilot` provider is known to be slower than the rest.
 
 </details>
 

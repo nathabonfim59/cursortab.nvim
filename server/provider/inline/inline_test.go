@@ -135,3 +135,64 @@ func TestParseCompletion_CursorClamped(t *testing.T) {
 	assert.True(t, ok, "should succeed")
 	assert.Equal(t, "abcdef", resp.Completions[0].Lines[0], "cursor clamped to line end")
 }
+
+// TestBuildPrompt_StripsCursorLineTrailingWhitespace tests that when the cursor is at the
+// end of a whitespace-only line (e.g., after pressing Enter with auto-indent), the trailing
+// whitespace is stripped from the prompt. This prevents the model from seeing trailing
+// whitespace and generating an empty completion (the model stops immediately when the
+// prompt ends with indentation, as it considers the line already "complete").
+func TestBuildPrompt_StripsCursorLineTrailingWhitespace(t *testing.T) {
+	config := &types.ProviderConfig{
+		ProviderModel: "test-model",
+	}
+	p := NewProvider(config)
+
+	ctx := &provider.Context{
+		Request: &types.CompletionRequest{
+			CursorCol: 4,
+		},
+		TrimmedLines: []string{
+			"def bubble_sort(arr):",
+			"    ", // auto-indent: cursor at col 4, all whitespace
+		},
+		CursorLine: 1,
+	}
+
+	req := p.PromptBuilder(p, ctx)
+
+	// Prompt should NOT end with "    " (trailing whitespace)
+	// It should end with the line before cursor (no whitespace-only suffix)
+	expected := "def bubble_sort(arr):\n"
+	assert.Equal(t, expected, req.Prompt, "prompt should not include trailing whitespace on cursor line")
+}
+
+// TestParseCompletion_WhitespaceOnlyCursorLine tests that when the cursor is on a
+// whitespace-only line and the model returns a completion with leading indentation
+// (because the prompt had the whitespace stripped), parseCompletion does not double-indent.
+// The model returns "    n = len(arr)" and beforeCursor should be "" (stripped from "    "),
+// so newLine = "" + "    n = len(arr)" = "    n = len(arr)".
+func TestParseCompletion_WhitespaceOnlyCursorLine(t *testing.T) {
+	config := &types.ProviderConfig{
+		ProviderModel: "test-model",
+	}
+	p := NewProvider(config)
+
+	ctx := &provider.Context{
+		Request: &types.CompletionRequest{
+			Lines:     []string{"def bubble_sort(arr):", "    "},
+			CursorRow: 2,
+			CursorCol: 4, // End of "    " (auto-indent)
+		},
+		Result: &openai.StreamResult{
+			Text: "    n = len(arr)", // Model includes indentation since prompt had it stripped
+		},
+	}
+
+	resp, ok := parseCompletion(p, ctx)
+
+	assert.True(t, ok, "should succeed")
+	assert.NotNil(t, resp, "response should not be nil")
+	assert.Equal(t, 1, len(resp.Completions), "should have 1 completion")
+	// Should be "    n = len(arr)" — not "        n = len(arr)" (double-indented)
+	assert.Equal(t, "    n = len(arr)", resp.Completions[0].Lines[0], "should not double-indent")
+}

@@ -64,11 +64,13 @@ func buildPrompt(p *provider.Provider, ctx *provider.Context) *openai.Completion
 	if ctx.CursorLine < len(ctx.TrimmedLines) {
 		currentLine := ctx.TrimmedLines[ctx.CursorLine]
 		cursorCol := ctx.Request.CursorCol
+		var prefix string
 		if cursorCol <= len(currentLine) {
-			promptBuilder.WriteString(currentLine[:cursorCol])
+			prefix = currentLine[:cursorCol]
 		} else {
-			promptBuilder.WriteString(currentLine)
+			prefix = currentLine
 		}
+		promptBuilder.WriteString(strings.TrimRight(prefix, " \t"))
 	}
 
 	return &openai.CompletionRequest{
@@ -89,7 +91,7 @@ func parseCompletion(p *provider.Provider, ctx *provider.Context) (*types.Comple
 
 	currentLine := req.Lines[req.CursorRow-1]
 	cursorCol := min(req.CursorCol, len(currentLine))
-	beforeCursor := currentLine[:cursorCol]
+	beforeCursor := strings.TrimRight(currentLine[:cursorCol], " \t")
 
 	newLine := beforeCursor + completionText
 	return p.BuildCompletion(ctx, req.CursorRow, req.CursorRow, []string{newLine})

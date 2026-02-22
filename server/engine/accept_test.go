@@ -653,3 +653,50 @@ func TestPartialAccept_MultiLineCompletion_CursorTargetConsistency(t *testing.T)
 		assert.Equal(t, int32(3), eng.cursorTarget.LineNumber, "cursor target should be preserved from stage 1")
 	})
 }
+
+// TestAdvanceStagedCompletion_AdditionGroupsSpanningMultipleOldLines verifies
+// that cumulative offset is computed correctly when a stage has only addition
+// groups but spans multiple old lines (BufferStart != BufferEnd). The stage
+// replaces old lines, so oldLineCount must reflect the replaced range.
+func TestAdvanceStagedCompletion_AdditionGroupsSpanningMultipleOldLines(t *testing.T) {
+	buf := newMockBuffer()
+	prov := newMockProvider()
+	clock := newMockClock()
+	eng := createTestEngine(buf, prov, clock)
+
+	// Stage 1: replaces old lines 6-7 with 5 new lines, all groups are additions
+	stage1 := &text.Stage{
+		BufferStart: 6,
+		BufferEnd:   7,
+		Lines:       []string{"", "", "def min_max(data):", "    return min(data)", ""},
+		Groups: []*text.Group{
+			{Type: "addition", StartLine: 1, EndLine: 2, BufferLine: 6},
+			{Type: "addition", StartLine: 5, EndLine: 5, BufferLine: 8},
+		},
+		CursorTarget: &types.CursorPredictionTarget{LineNumber: 13, RelativePath: "test.py"},
+	}
+	// Stage 2: further down, should be offset by stage 1's line count change
+	stage2 := &text.Stage{
+		BufferStart: 10,
+		BufferEnd:   10,
+		Lines:       []string{"", ""},
+		Groups: []*text.Group{
+			{Type: "addition", StartLine: 1, EndLine: 2, BufferLine: 10},
+		},
+		CursorTarget: &types.CursorPredictionTarget{LineNumber: 15, RelativePath: "test.py"},
+	}
+
+	eng.stagedCompletion = &text.StagedCompletion{
+		Stages:     []*text.Stage{stage1, stage2},
+		CurrentIdx: 0,
+	}
+
+	eng.advanceStagedCompletion()
+
+	// Stage 1 replaced 2 old lines with 5 new lines → offset = 5 - 2 = 3
+	// CumulativeOffset is applied to remaining stages then reset to 0
+	assert.Equal(t, 0, eng.stagedCompletion.CumulativeOffset, "offset reset after applying")
+	// Stage 2 should be shifted by 3 (from 10 to 13)
+	assert.Equal(t, 13, stage2.BufferStart, "stage 2 BufferStart shifted by 3")
+	assert.Equal(t, 13, stage2.BufferEnd, "stage 2 BufferEnd shifted by 3")
+}

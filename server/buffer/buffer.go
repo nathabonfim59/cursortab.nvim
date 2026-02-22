@@ -308,7 +308,8 @@ func (b *NvimBuffer) PrepareCompletion(startLine, endLineInc int, lines []string
 
 	// Groups are pre-computed by staging with BufferLine already set
 
-	applyBatch := b.getApplyBatch(startLine, endLineInc, lines, diffResult, isPureInsertion(groups))
+	replaceEnd := computeReplaceEnd(startLine, endLineInc, groups)
+	applyBatch := b.getApplyBatch(startLine, replaceEnd, lines, diffResult)
 
 	// Convert to Lua format
 	luaDiffResult := text.ToLuaFormat(&text.Stage{
@@ -768,7 +769,18 @@ func isPureInsertion(groups []*text.Group) bool {
 	return true
 }
 
-func (b *NvimBuffer) getApplyBatch(startLine, endLineInclusive int, lines []string, diffResult *text.DiffResult, isInsertion bool) *nvim.Batch {
+// computeReplaceEnd returns the end line for nvim_buf_set_lines. For pure
+// insertions (all addition groups, single old line), it returns startLine-1
+// so nvim inserts without replacing. Otherwise it returns endLineInc to
+// replace the old line range.
+func computeReplaceEnd(startLine, endLineInc int, groups []*text.Group) int {
+	if isPureInsertion(groups) && startLine == endLineInc {
+		return startLine - 1
+	}
+	return endLineInc
+}
+
+func (b *NvimBuffer) getApplyBatch(startLine, replaceEnd int, lines []string, diffResult *text.DiffResult) *nvim.Batch {
 	applyBatch := b.client.NewBatch()
 
 	b.clearNamespace(applyBatch, b.config.NsID)
@@ -779,14 +791,9 @@ func (b *NvimBuffer) getApplyBatch(startLine, endLineInclusive int, lines []stri
 	}
 
 	// nvim_buf_set_lines uses 0-indexed [start, end) range.
-	// Replacement: 1-indexed inclusive [startLine, endLineInclusive] maps to
-	// 0-indexed exclusive [startLine-1, endLineInclusive) by indexing coincidence.
-	// Pure insertion: start == end inserts without replacing any existing lines.
-	replaceEnd := endLineInclusive
-	if isInsertion {
-		replaceEnd = startLine - 1
-	}
-
+	// Replacement: 1-indexed inclusive [startLine, replaceEnd] maps to
+	// 0-indexed exclusive [startLine-1, replaceEnd) by indexing coincidence.
+	// Pure insertion: replaceEnd = startLine-1, so start == end inserts without replacing.
 	applyBatch.SetBufferLines(b.id, startLine-1, replaceEnd, false, placeBytes)
 
 	b.pending = &PendingEdit{

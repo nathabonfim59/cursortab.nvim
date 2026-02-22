@@ -290,6 +290,25 @@ func TestCommitPending_Replacement(t *testing.T) {
 	assert.Equal(t, "new line 2", buf.lines[1], "line 2 replaced")
 }
 
+func TestComputeReplaceEnd(t *testing.T) {
+	additionGroups := []*text.Group{
+		{Type: "addition", StartLine: 1, EndLine: 2, BufferLine: 6},
+		{Type: "addition", StartLine: 5, EndLine: 5, BufferLine: 8},
+	}
+	modificationGroups := []*text.Group{
+		{Type: "modification", StartLine: 1, EndLine: 1, BufferLine: 6},
+	}
+
+	// Pure insertion: all additions, single old line
+	assert.Equal(t, 5, computeReplaceEnd(6, 6, additionGroups), "single line additions → insert")
+
+	// All additions but spanning multiple old lines → must replace
+	assert.Equal(t, 7, computeReplaceEnd(6, 7, additionGroups), "multi-line additions → replace")
+
+	// Modification groups → replace
+	assert.Equal(t, 6, computeReplaceEnd(6, 6, modificationGroups), "modification → replace")
+}
+
 // --- isPureInsertion Tests ---
 
 func TestIsPureInsertion(t *testing.T) {

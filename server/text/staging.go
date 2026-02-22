@@ -321,12 +321,22 @@ func finalizeStages(stages []*Stage, newLines []string, filePath string, baseLin
 		remappedChanges := make(map[int]LineChange)
 		relativeToBufferLine := make(map[int]int)
 		for lineNum, change := range stage.rawChanges {
-			newLineNum := lineNum
-			if change.NewLineNum > 0 {
-				newLineNum = change.NewLineNum
+			var relativeLine int
+			if change.Type == ChangeDeletion {
+				// For deletions, lineNum IS oldLineNum. Using the anchor (NewLineNum)
+				// collapses consecutive deletions sharing the same anchor to the same
+				// relativeLine. Instead, position relative to stage.startLine so that
+				// adjacent deletions get consecutive relative lines and non-adjacent
+				// deletions get non-consecutive relative lines (separate groups).
+				relativeLine = lineNum - stage.startLine + 1
+			} else {
+				newLineNum := lineNum
+				if change.NewLineNum > 0 {
+					newLineNum = change.NewLineNum
+				}
+				relativeLine = newLineNum - newStartLine + 1
 			}
-			relativeLine := newLineNum - newStartLine + 1
-			relativeIdx := newLineNum - newStartLine
+			relativeIdx := relativeLine - 1
 
 			if relativeIdx >= 0 && relativeIdx < len(stageOldLines) {
 				stageOldLines[relativeIdx] = change.OldContent

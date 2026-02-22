@@ -54,6 +54,54 @@ func TestStageDistanceFromCursor_NoOffset(t *testing.T) {
 	}
 }
 
+// TestCreateStages_ConsecutiveDeletionsBlankLines verifies that two consecutive
+// blank line deletions result in a single group with both lines, not one dropped.
+func TestCreateStages_ConsecutiveDeletionsBlankLines(t *testing.T) {
+	oldLines := []string{
+		"def foo():",
+		"    pass",
+		" ",
+		"",
+		"def bar():",
+		"    pass",
+	}
+	newLines := []string{
+		"def foo():",
+		"    pass",
+		"def bar():",
+		"    pass",
+	}
+
+	text1 := JoinLines(oldLines)
+	text2 := JoinLines(newLines)
+	diff := ComputeDiff(text1, text2)
+
+	result := CreateStages(&StagingParams{
+		Diff:               diff,
+		CursorRow:          3,
+		CursorCol:          0,
+		ViewportTop:        1,
+		ViewportBottom:     50,
+		BaseLineOffset:     1,
+		ProximityThreshold: 5,
+		MaxLines:           0,
+		FilePath:           "test.py",
+		NewLines:           newLines,
+		OldLines:           oldLines,
+	})
+
+	assert.NotNil(t, result, "result not nil")
+	assert.Equal(t, 1, len(result.Stages), "1 stage")
+
+	stage := result.Stages[0]
+	assert.Equal(t, 2, len(stage.Changes), "stage has 2 deletion changes")
+	assert.Equal(t, 1, len(stage.Groups), "both consecutive deletions form 1 group")
+
+	group := stage.Groups[0]
+	assert.Equal(t, "deletion", group.Type, "group type is deletion")
+	assert.Equal(t, 2, len(group.Lines), "group spans both deleted lines")
+}
+
 func TestJoinLines(t *testing.T) {
 	lines := []string{"line1", "line2", "line3"}
 	result := JoinLines(lines)

@@ -1,0 +1,33 @@
+[
+  {
+    "cursor_col": 37,
+    "cursor_line": 2,
+    "groups": [
+      {
+        "buffer_line": 8,
+        "end_line": 1,
+        "lines": [
+          "def calculate_min_max(data):"
+        ],
+        "old_lines": [
+          "def calculate_min_ma(data):"
+        ],
+        "start_line": 1,
+        "type": "modification"
+      },
+      {
+        "buffer_line": 9,
+        "end_line": 2,
+        "lines": [
+          "    return np.min(data), np.max(data)"
+        ],
+        "old_lines": [
+          "    return np.std(data)"
+        ],
+        "start_line": 2,
+        "type": "modification"
+      }
+    ],
+    "startLine": 8
+  }
+]

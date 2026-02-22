@@ -56,12 +56,12 @@ pre { font-family: 'JetBrains Mono', monospace; font-size: 13px; margin: 0; }
 </style>
 </head>
 <body>
-<h1>E2E Pipeline Report <span class="stats"><span class="meta">62 fixtures</span><span class="pass">62 pass</span></span></h1>
+<h1>E2E Pipeline Report <span class="stats"><span class="meta">64 fixtures</span><span class="pass">63 pass</span><span class="unverified">1 unverified</span></span></h1>
 <div class="filters">
-<button class="filter-btn active" data-filter="all">All (62)</button>
-<button class="filter-btn" data-filter="passed">Passed (62)</button>
+<button class="filter-btn active" data-filter="all">All (64)</button>
+<button class="filter-btn" data-filter="passed">Passed (63)</button>
 <button class="filter-btn" data-filter="failed">Failed (0)</button>
-<button class="filter-btn" data-filter="unverified">Unverified (0)</button>
+<button class="filter-btn" data-filter="unverified">Unverified (1)</button>
 </div>
 <details class="fixture" data-status="passed" open>
 <summary class="hdr"><h2>addition-at-first-line</h2><button class="copy-btn" data-name="addition-at-first-line" onclick="navigator.clipboard.writeText(this.dataset.name)">copy</button> <span class="pass">verified</span> <span class="pass">batch:pass</span> <span class="pass">inc:pass</span> <span class="meta">cursor=(1,0) vp=[1,50]</span></summary>
@@ -960,6 +960,73 @@ pre { font-family: 'JetBrains Mono', monospace; font-size: 13px; margin: 0; }
 </details></div>
 </details>
 <details class="fixture" data-status="passed" open>
+<summary class="hdr"><h2>consecutive-deletions-blank-lines</h2><button class="copy-btn" data-name="consecutive-deletions-blank-lines" onclick="navigator.clipboard.writeText(this.dataset.name)">copy</button> <span class="pass">verified</span> <span class="pass">batch:pass</span> <span class="pass">inc:pass</span> <span class="meta">cursor=(8,0) vp=[1,50]</span></summary>
+<div class="pipelines">
+<div class="pipeline-col">
+<div class="pipeline-label">Batch</div>
+<div class="pane">
+<h3>Old</h3><pre><span class="line"><span class="ln">1</span>import numpy as np</span><span class="line"><span class="ln">2</span></span><span class="line"><span class="ln">3</span></span><span class="line"><span class="ln">4</span>def calculate_mean(data):</span><span class="line"><span class="ln">5</span>    return np.mean(data)</span><span class="line"><span class="ln">6</span>def calculate_std(data):</span><span class="line"><span class="ln">7</span>    return np.std(data)</span><span class="line"><span class="ln">8</span><span class="cursor"> </span></span><span class="line"><span class="ln">9</span></span><span class="line"><span class="ln">10</span>def calculate_var(data):</span><span class="line"><span class="ln">11</span>    return np.var(data)</span><span class="line"><span class="ln">12</span></span></pre></div>
+<div class="pane">
+<h3>Preview</h3><pre><span class="line"><span class="ln">1</span>import numpy as np</span><span class="line"><span class="ln">2</span></span><span class="line"><span class="ln">3</span></span><span class="line"><span class="ln">4</span>def calculate_mean(data):</span><span class="line"><span class="ln">5</span>    return np.mean(data)</span><span class="line"><span class="ln">6</span>def calculate_std(data):</span><span class="line"><span class="ln">7</span>    return np.std(data)</span><span class="line del"><span class="ln">8</span><span class="cursor"> </span></span><span class="line del"><span class="ln">9</span></span><span class="line"><span class="ln">10</span>def calculate_var(data):</span><span class="line"><span class="ln">11</span>    return np.var(data)</span><span class="line"><span class="ln">12</span></span></pre></div>
+<div class="pane">
+<h3>New</h3><pre><span class="line"><span class="ln">1</span>import numpy as np</span><span class="line"><span class="ln">2</span></span><span class="line"><span class="ln">3</span></span><span class="line"><span class="ln">4</span>def calculate_mean(data):</span><span class="line"><span class="ln">5</span>    return np.mean(data)</span><span class="line"><span class="ln">6</span>def calculate_std(data):</span><span class="line"><span class="ln">7</span>    return np.std(data)</span><span class="line"><span class="ln">8</span>def calculate_var(data):</span><span class="line"><span class="ln">9</span>    return np.var(data)</span><span class="line"><span class="ln">10</span></span></pre></div>
+</div>
+<div class="pipeline-col">
+<div class="pipeline-label">Incremental</div>
+<div class="pane">
+<h3>Old</h3><pre><span class="line"><span class="ln">1</span>import numpy as np</span><span class="line"><span class="ln">2</span></span><span class="line"><span class="ln">3</span></span><span class="line"><span class="ln">4</span>def calculate_mean(data):</span><span class="line"><span class="ln">5</span>    return np.mean(data)</span><span class="line"><span class="ln">6</span>def calculate_std(data):</span><span class="line"><span class="ln">7</span>    return np.std(data)</span><span class="line"><span class="ln">8</span><span class="cursor"> </span></span><span class="line"><span class="ln">9</span></span><span class="line"><span class="ln">10</span>def calculate_var(data):</span><span class="line"><span class="ln">11</span>    return np.var(data)</span><span class="line"><span class="ln">12</span></span></pre></div>
+<div class="pane">
+<h3>Preview</h3><pre><span class="line"><span class="ln">1</span>import numpy as np</span><span class="line"><span class="ln">2</span></span><span class="line"><span class="ln">3</span></span><span class="line"><span class="ln">4</span>def calculate_mean(data):</span><span class="line"><span class="ln">5</span>    return np.mean(data)</span><span class="line"><span class="ln">6</span>def calculate_std(data):</span><span class="line"><span class="ln">7</span>    return np.std(data)</span><span class="line del"><span class="ln">8</span><span class="cursor"> </span></span><span class="line del"><span class="ln">9</span></span><span class="line"><span class="ln">10</span>def calculate_var(data):</span><span class="line"><span class="ln">11</span>    return np.var(data)</span><span class="line"><span class="ln">12</span></span></pre></div>
+<div class="pane">
+<h3>New</h3><pre><span class="line"><span class="ln">1</span>import numpy as np</span><span class="line"><span class="ln">2</span></span><span class="line"><span class="ln">3</span></span><span class="line"><span class="ln">4</span>def calculate_mean(data):</span><span class="line"><span class="ln">5</span>    return np.mean(data)</span><span class="line"><span class="ln">6</span>def calculate_std(data):</span><span class="line"><span class="ln">7</span>    return np.std(data)</span><span class="line"><span class="ln">8</span>def calculate_var(data):</span><span class="line"><span class="ln">9</span>    return np.var(data)</span><span class="line"><span class="ln">10</span></span></pre></div>
+</div>
+</div>
+<div class="json-section"><details class="json-details"><summary>JSON</summary>
+<div class="cols-2">
+<div class="json-col"><code class="shiki-json">[
+  {
+    &#34;cursor_col&#34;: -1,
+    &#34;cursor_line&#34;: -1,
+    &#34;groups&#34;: [
+      {
+        &#34;buffer_line&#34;: 8,
+        &#34;end_line&#34;: 2,
+        &#34;lines&#34;: [
+          &#34;&#34;,
+          &#34;&#34;
+        ],
+        &#34;old_lines&#34;: null,
+        &#34;start_line&#34;: 1,
+        &#34;type&#34;: &#34;deletion&#34;
+      }
+    ],
+    &#34;startLine&#34;: 8
+  }
+]</code></div>
+<div class="json-col"><code class="shiki-json">[
+  {
+    &#34;cursor_col&#34;: -1,
+    &#34;cursor_line&#34;: -1,
+    &#34;groups&#34;: [
+      {
+        &#34;buffer_line&#34;: 8,
+        &#34;end_line&#34;: 2,
+        &#34;lines&#34;: [
+          &#34;&#34;,
+          &#34;&#34;
+        ],
+        &#34;old_lines&#34;: null,
+        &#34;start_line&#34;: 1,
+        &#34;type&#34;: &#34;deletion&#34;
+      }
+    ],
+    &#34;startLine&#34;: 8
+  }
+]</code></div>
+</div>
+</details></div>
+</details>
+<details class="fixture" data-status="passed" open>
 <summary class="hdr"><h2>consecutive-empty-lines</h2><button class="copy-btn" data-name="consecutive-empty-lines" onclick="navigator.clipboard.writeText(this.dataset.name)">copy</button> <span class="pass">verified</span> <span class="pass">batch:pass</span> <span class="pass">inc:pass</span> <span class="meta">cursor=(1,0) vp=[1,50]</span></summary>
 <div class="pipelines">
 <div class="pipeline-col">
@@ -1126,6 +1193,99 @@ pre { font-family: 'JetBrains Mono', monospace; font-size: 13px; margin: 0; }
       }
     ],
     &#34;startLine&#34;: 2
+  }
+]</code></div>
+</div>
+</details></div>
+</details>
+<details class="fixture" data-status="unverified" open>
+<summary class="hdr"><h2>consecutive-modifications-renamed-function</h2><button class="copy-btn" data-name="consecutive-modifications-renamed-function" onclick="navigator.clipboard.writeText(this.dataset.name)">copy</button> <span class="unverified">unverified</span> <span class="pass">batch:pass</span> <span class="pass">inc:pass</span> <span class="meta">cursor=(8,24) vp=[1,50]</span></summary>
+<div class="pipelines">
+<div class="pipeline-col">
+<div class="pipeline-label">Batch</div>
+<div class="pane">
+<h3>Old</h3><pre><span class="line"><span class="ln">1</span>import numpy as np</span><span class="line"><span class="ln">2</span></span><span class="line"><span class="ln">3</span></span><span class="line"><span class="ln">4</span>def calculate_mean(data):</span><span class="line"><span class="ln">5</span>    return np.mean(data)</span><span class="line"><span class="ln">6</span></span><span class="line"><span class="ln">7</span></span><span class="line"><span class="ln">8</span>def calculate_min_ma(dat<span class="cursor">a</span>):</span><span class="line"><span class="ln">9</span>    return np.std(data)</span><span class="line"><span class="ln">10</span></span><span class="line"><span class="ln">11</span></span><span class="line"><span class="ln">12</span>def calculate_var(data):</span><span class="line"><span class="ln">13</span>    return np.var(data)</span><span class="line"><span class="ln">14</span></span></pre></div>
+<div class="pane">
+<h3>Preview</h3><pre><span class="line"><span class="ln">1</span>import numpy as np</span><span class="line"><span class="ln">2</span></span><span class="line"><span class="ln">3</span></span><span class="line"><span class="ln">4</span>def calculate_mean(data):</span><span class="line"><span class="ln">5</span>    return np.mean(data)</span><span class="line"><span class="ln">6</span></span><span class="line"><span class="ln">7</span></span><span class="line del"><span class="ln">8</span>def calculate_min_ma(dat<span class="cursor">a</span>):</span><span class="line mod side"><span class="ln">→</span>def calculate_min_max(data):</span><span class="line del"><span class="ln">9</span>    return np.std(data)</span><span class="line mod side"><span class="ln">→</span>    return np.min(data), np.max(data)</span><span class="line"><span class="ln">10</span></span><span class="line"><span class="ln">11</span></span><span class="line"><span class="ln">12</span>def calculate_var(data):</span><span class="line"><span class="ln">13</span>    return np.var(data)</span><span class="line"><span class="ln">14</span></span></pre></div>
+<div class="pane">
+<h3>New</h3><pre><span class="line"><span class="ln">1</span>import numpy as np</span><span class="line"><span class="ln">2</span></span><span class="line"><span class="ln">3</span></span><span class="line"><span class="ln">4</span>def calculate_mean(data):</span><span class="line"><span class="ln">5</span>    return np.mean(data)</span><span class="line"><span class="ln">6</span></span><span class="line"><span class="ln">7</span></span><span class="line"><span class="ln">8</span>def calculate_min_max(data):</span><span class="line"><span class="ln">9</span>    return np.min(data), np.max(data)<span class="cursor"> </span></span><span class="line"><span class="ln">10</span></span><span class="line"><span class="ln">11</span></span><span class="line"><span class="ln">12</span>def calculate_var(data):</span><span class="line"><span class="ln">13</span>    return np.var(data)</span><span class="line"><span class="ln">14</span></span></pre></div>
+</div>
+<div class="pipeline-col">
+<div class="pipeline-label">Incremental</div>
+<div class="pane">
+<h3>Old</h3><pre><span class="line"><span class="ln">1</span>import numpy as np</span><span class="line"><span class="ln">2</span></span><span class="line"><span class="ln">3</span></span><span class="line"><span class="ln">4</span>def calculate_mean(data):</span><span class="line"><span class="ln">5</span>    return np.mean(data)</span><span class="line"><span class="ln">6</span></span><span class="line"><span class="ln">7</span></span><span class="line"><span class="ln">8</span>def calculate_min_ma(dat<span class="cursor">a</span>):</span><span class="line"><span class="ln">9</span>    return np.std(data)</span><span class="line"><span class="ln">10</span></span><span class="line"><span class="ln">11</span></span><span class="line"><span class="ln">12</span>def calculate_var(data):</span><span class="line"><span class="ln">13</span>    return np.var(data)</span><span class="line"><span class="ln">14</span></span></pre></div>
+<div class="pane">
+<h3>Preview</h3><pre><span class="line"><span class="ln">1</span>import numpy as np</span><span class="line"><span class="ln">2</span></span><span class="line"><span class="ln">3</span></span><span class="line"><span class="ln">4</span>def calculate_mean(data):</span><span class="line"><span class="ln">5</span>    return np.mean(data)</span><span class="line"><span class="ln">6</span></span><span class="line"><span class="ln">7</span></span><span class="line del"><span class="ln">8</span>def calculate_min_ma(dat<span class="cursor">a</span>):</span><span class="line mod side"><span class="ln">→</span>def calculate_min_max(data):</span><span class="line del"><span class="ln">9</span>    return np.std(data)</span><span class="line mod side"><span class="ln">→</span>    return np.min(data), np.max(data)</span><span class="line"><span class="ln">10</span></span><span class="line"><span class="ln">11</span></span><span class="line"><span class="ln">12</span>def calculate_var(data):</span><span class="line"><span class="ln">13</span>    return np.var(data)</span><span class="line"><span class="ln">14</span></span></pre></div>
+<div class="pane">
+<h3>New</h3><pre><span class="line"><span class="ln">1</span>import numpy as np</span><span class="line"><span class="ln">2</span></span><span class="line"><span class="ln">3</span></span><span class="line"><span class="ln">4</span>def calculate_mean(data):</span><span class="line"><span class="ln">5</span>    return np.mean(data)</span><span class="line"><span class="ln">6</span></span><span class="line"><span class="ln">7</span></span><span class="line"><span class="ln">8</span>def calculate_min_max(data):</span><span class="line"><span class="ln">9</span>    return np.min(data), np.max(data)<span class="cursor"> </span></span><span class="line"><span class="ln">10</span></span><span class="line"><span class="ln">11</span></span><span class="line"><span class="ln">12</span>def calculate_var(data):</span><span class="line"><span class="ln">13</span>    return np.var(data)</span><span class="line"><span class="ln">14</span></span></pre></div>
+</div>
+</div>
+<div class="json-section"><details class="json-details" open><summary>JSON</summary>
+<div class="cols-2">
+<div class="json-col"><code class="shiki-json">[
+  {
+    &#34;cursor_col&#34;: 37,
+    &#34;cursor_line&#34;: 2,
+    &#34;groups&#34;: [
+      {
+        &#34;buffer_line&#34;: 8,
+        &#34;end_line&#34;: 1,
+        &#34;lines&#34;: [
+          &#34;def calculate_min_max(data):&#34;
+        ],
+        &#34;old_lines&#34;: [
+          &#34;def calculate_min_ma(data):&#34;
+        ],
+        &#34;start_line&#34;: 1,
+        &#34;type&#34;: &#34;modification&#34;
+      },
+      {
+        &#34;buffer_line&#34;: 9,
+        &#34;end_line&#34;: 2,
+        &#34;lines&#34;: [
+          &#34;    return np.min(data), np.max(data)&#34;
+        ],
+        &#34;old_lines&#34;: [
+          &#34;    return np.std(data)&#34;
+        ],
+        &#34;start_line&#34;: 2,
+        &#34;type&#34;: &#34;modification&#34;
+      }
+    ],
+    &#34;startLine&#34;: 8
+  }
+]</code></div>
+<div class="json-col"><code class="shiki-json">[
+  {
+    &#34;cursor_col&#34;: 37,
+    &#34;cursor_line&#34;: 2,
+    &#34;groups&#34;: [
+      {
+        &#34;buffer_line&#34;: 8,
+        &#34;end_line&#34;: 1,
+        &#34;lines&#34;: [
+          &#34;def calculate_min_max(data):&#34;
+        ],
+        &#34;old_lines&#34;: [
+          &#34;def calculate_min_ma(data):&#34;
+        ],
+        &#34;start_line&#34;: 1,
+        &#34;type&#34;: &#34;modification&#34;
+      },
+      {
+        &#34;buffer_line&#34;: 9,
+        &#34;end_line&#34;: 2,
+        &#34;lines&#34;: [
+          &#34;    return np.min(data), np.max(data)&#34;
+        ],
+        &#34;old_lines&#34;: [
+          &#34;    return np.std(data)&#34;
+        ],
+        &#34;start_line&#34;: 2,
+        &#34;type&#34;: &#34;modification&#34;
+      }
+    ],
+    &#34;startLine&#34;: 8
   }
 ]</code></div>
 </div>
@@ -3446,7 +3606,7 @@ pre { font-family: 'JetBrains Mono', monospace; font-size: 13px; margin: 0; }
 <div class="pane">
 <h3>Old</h3><pre><span class="line"><span class="ln">1</span><span class="cursor">l</span>ine 1</span><span class="line"><span class="ln">2</span>line 2</span><span class="line"><span class="ln">3</span>line 3</span><span class="line"><span class="ln">4</span>line 4</span><span class="line"><span class="ln">5</span>line 5</span></pre></div>
 <div class="pane">
-<h3>Preview</h3><pre><span class="line"><span class="ln">1</span><span class="cursor">l</span>ine 1</span><span class="line del"><span class="ln">2</span>line 2</span><span class="line del"><span class="ln">3</span>line 3</span><span class="line"><span class="ln">4</span>line 4</span><span class="line"><span class="ln">5</span>line 5</span></pre></div>
+<h3>Preview</h3><pre><span class="line"><span class="ln">1</span><span class="cursor">l</span>ine 1</span><span class="line del"><span class="ln">2</span>line 2</span><span class="line"><span class="ln">3</span>line 3</span><span class="line del"><span class="ln">4</span>line 4</span><span class="line"><span class="ln">5</span>line 5</span></pre></div>
 <div class="pane">
 <h3>New</h3><pre><span class="line"><span class="ln">1</span>line 1</span><span class="line"><span class="ln">2</span>line 3</span><span class="line"><span class="ln">3</span>line 5</span></pre></div>
 </div>
@@ -3455,7 +3615,7 @@ pre { font-family: 'JetBrains Mono', monospace; font-size: 13px; margin: 0; }
 <div class="pane">
 <h3>Old</h3><pre><span class="line"><span class="ln">1</span><span class="cursor">l</span>ine 1</span><span class="line"><span class="ln">2</span>line 2</span><span class="line"><span class="ln">3</span>line 3</span><span class="line"><span class="ln">4</span>line 4</span><span class="line"><span class="ln">5</span>line 5</span></pre></div>
 <div class="pane">
-<h3>Preview</h3><pre><span class="line"><span class="ln">1</span><span class="cursor">l</span>ine 1</span><span class="line del"><span class="ln">2</span>line 2</span><span class="line del"><span class="ln">3</span>line 3</span><span class="line"><span class="ln">4</span>line 4</span><span class="line"><span class="ln">5</span>line 5</span></pre></div>
+<h3>Preview</h3><pre><span class="line"><span class="ln">1</span><span class="cursor">l</span>ine 1</span><span class="line del"><span class="ln">2</span>line 2</span><span class="line"><span class="ln">3</span>line 3</span><span class="line del"><span class="ln">4</span>line 4</span><span class="line"><span class="ln">5</span>line 5</span></pre></div>
 <div class="pane">
 <h3>New</h3><pre><span class="line"><span class="ln">1</span>line 1</span><span class="line"><span class="ln">2</span>line 3</span><span class="line"><span class="ln">3</span>line 5</span></pre></div>
 </div>
@@ -3469,13 +3629,22 @@ pre { font-family: 'JetBrains Mono', monospace; font-size: 13px; margin: 0; }
     &#34;groups&#34;: [
       {
         &#34;buffer_line&#34;: 2,
-        &#34;end_line&#34;: 2,
+        &#34;end_line&#34;: 1,
         &#34;lines&#34;: [
-          &#34;line 2&#34;,
-          &#34;line 4&#34;
+          &#34;line 2&#34;
         ],
         &#34;old_lines&#34;: null,
         &#34;start_line&#34;: 1,
+        &#34;type&#34;: &#34;deletion&#34;
+      },
+      {
+        &#34;buffer_line&#34;: 4,
+        &#34;end_line&#34;: 3,
+        &#34;lines&#34;: [
+          &#34;line 4&#34;
+        ],
+        &#34;old_lines&#34;: null,
+        &#34;start_line&#34;: 3,
         &#34;type&#34;: &#34;deletion&#34;
       }
     ],
@@ -3489,13 +3658,22 @@ pre { font-family: 'JetBrains Mono', monospace; font-size: 13px; margin: 0; }
     &#34;groups&#34;: [
       {
         &#34;buffer_line&#34;: 2,
-        &#34;end_line&#34;: 2,
+        &#34;end_line&#34;: 1,
         &#34;lines&#34;: [
-          &#34;line 2&#34;,
-          &#34;line 4&#34;
+          &#34;line 2&#34;
         ],
         &#34;old_lines&#34;: null,
         &#34;start_line&#34;: 1,
+        &#34;type&#34;: &#34;deletion&#34;
+      },
+      {
+        &#34;buffer_line&#34;: 4,
+        &#34;end_line&#34;: 3,
+        &#34;lines&#34;: [
+          &#34;line 4&#34;
+        ],
+        &#34;old_lines&#34;: null,
+        &#34;start_line&#34;: 3,
         &#34;type&#34;: &#34;deletion&#34;
       }
     ],

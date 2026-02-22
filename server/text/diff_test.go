@@ -1290,3 +1290,40 @@ func TestDiffWithTabs(t *testing.T) {
 	_, exists := actual.Changes[2]
 	assert.True(t, exists, "change at line 2")
 }
+
+// TestConsecutiveDeletionsBlankLines verifies that deleting multiple consecutive
+// blank lines (including whitespace-only lines) produces one deletion per line.
+// Regression test: a shared anchor caused both deletions to map to relativeLine=1,
+// silently dropping the second deletion.
+func TestConsecutiveDeletionsBlankLines(t *testing.T) {
+	oldLines := []string{
+		"def foo():",
+		"    pass",
+		" ",
+		"",
+		"def bar():",
+		"    pass",
+	}
+	newLines := []string{
+		"def foo():",
+		"    pass",
+		"def bar():",
+		"    pass",
+	}
+
+	text1 := JoinLines(oldLines)
+	text2 := JoinLines(newLines)
+	actual := ComputeDiff(text1, text2)
+
+	assert.Equal(t, 2, len(actual.Changes), "should detect 2 deletions")
+
+	del3, exists := actual.Changes[3]
+	assert.True(t, exists, "deletion at old line 3 exists")
+	assert.Equal(t, ChangeDeletion, del3.Type, "line 3 is deletion")
+	assert.Equal(t, " ", del3.Content, "line 3 content is space")
+
+	del4, exists := actual.Changes[4]
+	assert.True(t, exists, "deletion at old line 4 exists")
+	assert.Equal(t, ChangeDeletion, del4.Type, "line 4 is deletion")
+	assert.Equal(t, "", del4.Content, "line 4 content is empty string")
+}

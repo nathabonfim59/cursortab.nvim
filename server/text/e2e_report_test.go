@@ -415,8 +415,12 @@ func renderPreviewLine(b *strings.Builder, lineNum int, pl previewLine) {
 	renderLine(b, lineNum, pl.Text, pl.HL, pl.CursorCol)
 }
 
-func renderTextPane(b *strings.Builder, label string, lines []string, cursorRow, cursorCol int) {
-	b.WriteString("<div class=\"pane\">\n")
+func renderTextPane(b *strings.Builder, label string, lines []string, cursorRow, cursorCol int, extraClass ...string) {
+	cls := "pane"
+	if len(extraClass) > 0 && extraClass[0] != "" {
+		cls += " " + extraClass[0]
+	}
+	fmt.Fprintf(b, "<div class=\"%s\">\n", cls)
 	fmt.Fprintf(b, "<h3>%s</h3><pre>", html.EscapeString(label))
 	for i, line := range lines {
 		if i == len(lines)-1 && line == "" {
@@ -431,7 +435,7 @@ func renderTextPane(b *strings.Builder, label string, lines []string, cursorRow,
 	b.WriteString("</pre></div>\n")
 }
 
-func renderPipelineCol(b *strings.Builder, label string, oldText, newText string, stages []stageInfo, oldCursorRow, oldCursorCol int) {
+func renderPipelineCol(b *strings.Builder, label string, oldText, newText string, stages []stageInfo, oldCursorRow, oldCursorCol int, expectedStages []stageInfo) {
 	newCursorRow, newCursorCol := stageFinalCursor(stages, oldCursorRow, oldCursorCol)
 
 	b.WriteString("<div class=\"pipeline-col\">\n")
@@ -445,6 +449,15 @@ func renderPipelineCol(b *strings.Builder, label string, oldText, newText string
 		renderPreviewLine(b, i+1, pl)
 	}
 	b.WriteString("</pre></div>\n")
+
+	if expectedStages != nil {
+		expectedPreview := buildPreview(oldText, newText, expectedStages, oldCursorRow, oldCursorCol)
+		b.WriteString("<div class=\"pane pane-expected\">\n<h3>Expected Preview</h3><pre>")
+		for i, pl := range expectedPreview {
+			renderPreviewLine(b, i+1, pl)
+		}
+		b.WriteString("</pre></div>\n")
+	}
 
 	renderTextPane(b, "New", strings.Split(newText, "\n"), newCursorRow, newCursorCol)
 
@@ -519,6 +532,8 @@ pre { font-family: 'JetBrains Mono', monospace; font-size: 13px; margin: 0; }
 .del-hl { background: #67060c; color: #ffa198; }
 .add-hl { background: #0f5323; color: #7ee787; }
 .side { font-style: italic; opacity: 0.85; }
+.pane-expected { border-top: 1px dashed #30363d; }
+.pane-expected h3 { color: #d29922; }
 .apply-section { border-top: 1px solid #30363d; background: #0d1117; }
 .json-section { border-top: 1px solid #30363d; background: #0d1117; }
 .json-col { min-width: 0; padding: 8px; overflow-x: auto; }
@@ -615,9 +630,22 @@ pre { font-family: 'JetBrains Mono', monospace; font-size: 13px; margin: 0; }
 			f.Params.ViewportTop, f.Params.ViewportBottom,
 			vStatus, bStatus, iStatus, applyStatuses)
 
+		var expectedStages []stageInfo
+		if f.Verified && (!f.BatchPass || !f.IncrementalPass) {
+			expectedStages = parseStages(f.Expected)
+		}
 		b.WriteString("<div class=\"pipelines\">\n")
-		renderPipelineCol(&b, "Batch", f.OldText, f.NewText, batchStages, f.Params.CursorRow, f.Params.CursorCol)
-		renderPipelineCol(&b, "Incremental", f.OldText, f.NewText, incStages, f.Params.CursorRow, f.Params.CursorCol)
+		var batchExpected, incExpected []stageInfo
+		if expectedStages != nil {
+			if !f.BatchPass {
+				batchExpected = expectedStages
+			}
+			if !f.IncrementalPass {
+				incExpected = expectedStages
+			}
+		}
+		renderPipelineCol(&b, "Batch", f.OldText, f.NewText, batchStages, f.Params.CursorRow, f.Params.CursorCol, batchExpected)
+		renderPipelineCol(&b, "Incremental", f.OldText, f.NewText, incStages, f.Params.CursorRow, f.Params.CursorCol, incExpected)
 		b.WriteString("</div>\n")
 
 		for _, mlr := range f.MaxLinesResults {
@@ -629,7 +657,7 @@ pre { font-family: 'JetBrains Mono', monospace; font-size: 13px; margin: 0; }
 				b.WriteString("<div class=\"apply-section\">\n")
 				b.WriteString("<div class=\"cols-2\">\n")
 				renderTextPane(&b, fmt.Sprintf("Applied %s (got)", label), mlr.ApplyLines, 0, -1)
-				renderTextPane(&b, "Expected (new.txt)", strings.Split(f.NewText, "\n"), 0, -1)
+				renderTextPane(&b, "Expected (new.txt)", strings.Split(f.NewText, "\n"), 0, -1, "pane-expected")
 				b.WriteString("</div>\n")
 				b.WriteString("</div>\n")
 			}
@@ -637,7 +665,7 @@ pre { font-family: 'JetBrains Mono', monospace; font-size: 13px; margin: 0; }
 				b.WriteString("<div class=\"apply-section\">\n")
 				b.WriteString("<div class=\"cols-2\">\n")
 				renderTextPane(&b, fmt.Sprintf("Partial Accept %s (got)", label), mlr.PartialAcceptLines, 0, -1)
-				renderTextPane(&b, "Expected (new.txt)", strings.Split(f.NewText, "\n"), 0, -1)
+				renderTextPane(&b, "Expected (new.txt)", strings.Split(f.NewText, "\n"), 0, -1, "pane-expected")
 				b.WriteString("</div>\n")
 				b.WriteString("</div>\n")
 			}

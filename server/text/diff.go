@@ -2,7 +2,6 @@ package text
 
 import (
 	"cursortab/logger"
-	"cursortab/utils"
 	"strings"
 
 	"github.com/sergi/go-diff/diffmatchpatch"
@@ -570,156 +569,50 @@ func handleModificationsWithMapping(deletedLines, insertedLines []string,
 	}
 }
 
-// categorizeLineChangeWithColumns determines the type of change between two lines and returns column range
+// categorizeLineChangeWithColumns determines the type of change between two lines
+// using common prefix/suffix analysis to find the single contiguous changed span.
 func categorizeLineChangeWithColumns(oldLine, newLine string) (ChangeType, int, int) {
-	// Handle empty old line with non-empty new line (filling an empty line)
-	// This should be append_chars so it renders as inline ghost text, not a virtual line
 	if oldLine == "" && newLine != "" {
 		return ChangeAppendChars, 0, len(newLine)
 	}
 
-	dmp := diffmatchpatch.New()
-	diffs := dmp.DiffMain(oldLine, newLine, false)
-	diffs = dmp.DiffCleanupSemantic(diffs)
-
-	// Count diff operations and extract texts
-	var insertions, deletions int
-	var hasEqual bool
-	var deletedText, insertedText string
-
-	for _, diff := range diffs {
-		switch diff.Type {
-		case diffmatchpatch.DiffInsert:
-			insertions++
-			insertedText = diff.Text
-		case diffmatchpatch.DiffDelete:
-			deletions++
-			deletedText = diff.Text
-		case diffmatchpatch.DiffEqual:
-			hasEqual = true
-		}
-	}
-
-	// Handle pure insertions (no deletions)
-	if deletions == 0 && insertions > 0 && hasEqual {
-		return categorizePureInsertion(oldLine, newLine, diffs, insertions)
-	}
-
-	// Handle pure deletions (no insertions)
-	if insertions == 0 && deletions > 0 && hasEqual {
-		return categorizePureDeletion(diffs)
-	}
-
-	// Handle single insertion + single deletion (potential simple replacement)
-	if insertions == 1 && deletions == 1 && hasEqual {
-		return categorizeSingleReplacement(diffs, deletedText, insertedText)
-	}
-
-	// Default to general modification
-	return ChangeModification, 0, 0
-}
-
-// categorizePureInsertion handles cases with only insertions (no deletions)
-func categorizePureInsertion(oldLine, newLine string, diffs []diffmatchpatch.Diff, insertions int) (ChangeType, int, int) {
-	// Check if it's an append at the end
 	if strings.HasPrefix(newLine, oldLine) {
 		return ChangeAppendChars, len(oldLine), len(newLine)
 	}
 
-	// Single insertion - find position and treat as replacement
-	if insertions == 1 {
-		pos := 0
-		for _, diff := range diffs {
-			if diff.Type == diffmatchpatch.DiffInsert {
-				return ChangeReplaceChars, pos, pos + len(diff.Text)
-			}
-			if diff.Type == diffmatchpatch.DiffEqual {
-				pos += len(diff.Text)
-			}
-		}
+	prefixLen := 0
+	minLen := min(len(oldLine), len(newLine))
+	for prefixLen < minLen && oldLine[prefixLen] == newLine[prefixLen] {
+		prefixLen++
 	}
 
-	// Multiple insertions - general modification
-	return ChangeModification, 0, 0
-}
-
-// categorizePureDeletion handles cases with only deletions (no insertions)
-func categorizePureDeletion(diffs []diffmatchpatch.Diff) (ChangeType, int, int) {
-	pos := 0
-	for _, diff := range diffs {
-		if diff.Type == diffmatchpatch.DiffDelete {
-			return ChangeDeleteChars, pos, pos + len(diff.Text)
-		}
-		if diff.Type == diffmatchpatch.DiffEqual {
-			pos += len(diff.Text)
-		}
+	suffixLen := 0
+	for suffixLen < minLen-prefixLen &&
+		oldLine[len(oldLine)-1-suffixLen] == newLine[len(newLine)-1-suffixLen] {
+		suffixLen++
 	}
-	return ChangeModification, 0, 0
-}
 
-// categorizeSingleReplacement handles cases with exactly one deletion and one insertion
-func categorizeSingleReplacement(diffs []diffmatchpatch.Diff, deletedText, insertedText string) (ChangeType, int, int) {
-	// Check if this is a complex modification based on word count heuristics
-	if isComplexModification(deletedText, insertedText) {
+	oldMiddle := len(oldLine) - prefixLen - suffixLen
+	newMiddle := len(newLine) - prefixLen - suffixLen
+
+	if prefixLen == 0 && suffixLen == 0 {
 		return ChangeModification, 0, 0
 	}
 
-	// The delete and insert must be adjacent for replace_chars to accurately
-	// represent the change. If there's an Equal segment between them, the changes
-	// are at different positions and can't be shown as a single replacement span.
-	adjacent := false
-	for i := 0; i < len(diffs)-1; i++ {
-		if (diffs[i].Type == diffmatchpatch.DiffDelete && diffs[i+1].Type == diffmatchpatch.DiffInsert) ||
-			(diffs[i].Type == diffmatchpatch.DiffInsert && diffs[i+1].Type == diffmatchpatch.DiffDelete) {
-			adjacent = true
-			break
-		}
+	if newMiddle == 0 && oldMiddle > 0 {
+		return ChangeDeleteChars, prefixLen, prefixLen + oldMiddle
 	}
-	if !adjacent {
+
+	// ReplaceChars for localized changes within the line.
+	if newMiddle > 0 {
+		changed := max(oldMiddle, newMiddle)
+		if changed <= MaxReplaceCharsSpan {
+			return ChangeReplaceChars, prefixLen, prefixLen + newMiddle
+		}
 		return ChangeModification, 0, 0
 	}
 
-	// Simple replacement - find the insertion position
-	pos := 0
-	for _, diff := range diffs {
-		if diff.Type == diffmatchpatch.DiffInsert {
-			return ChangeReplaceChars, pos, pos + len(diff.Text)
-		}
-		if diff.Type == diffmatchpatch.DiffEqual {
-			pos += len(diff.Text)
-		}
-	}
-
 	return ChangeModification, 0, 0
-}
-
-// isComplexModification determines if a deletion+insertion pair is too complex for simple replacement
-func isComplexModification(deletedText, insertedText string) bool {
-	deletedWords := len(strings.Fields(deletedText))
-	insertedWords := len(strings.Fields(insertedText))
-
-	if deletedWords > ComplexModWordCountThreshold || insertedWords > ComplexModWordCountThreshold {
-		return true
-	}
-
-	if utils.Abs(deletedWords-insertedWords) > MaxWordCountDifference {
-		return true
-	}
-
-	deletedLen := len(deletedText)
-	insertedLen := len(insertedText)
-
-	if deletedLen == 0 {
-		return insertedLen > MinLengthForEmptyDeletion
-	}
-
-	lengthRatio := float64(insertedLen) / float64(deletedLen)
-
-	if deletedWords == 1 && insertedWords == 1 {
-		return lengthRatio > SingleWordMaxRatio || lengthRatio < SingleWordMinRatio
-	}
-
-	return lengthRatio > MultiWordMaxRatio || lengthRatio < MultiWordMinRatio
 }
 
 // FindFirstChangedLine compares old lines with new lines and returns the first line number (1-indexed)

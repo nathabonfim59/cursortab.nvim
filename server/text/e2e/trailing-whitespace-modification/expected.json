@@ -5,6 +5,8 @@
     "groups": [
       {
         "buffer_line": 2,
+        "col_end": 18,
+        "col_start": 6,
         "end_line": 1,
         "lines": [
           "    x = getValue()"
@@ -12,6 +14,7 @@
         "old_lines": [
           "    x  "
         ],
+        "render_hint": "replace_chars",
         "start_line": 1,
         "type": "modification"
       },

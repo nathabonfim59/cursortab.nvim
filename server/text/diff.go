@@ -327,25 +327,38 @@ func LineSimilarity(line1, line2 string) float64 {
 	return 1.0 - float64(levenshteinDist)/float64(maxLen)
 }
 
-// findBestMatch finds the best matching line in insertedLines for the given deletedLine
-// Returns the index of the best match and its similarity score
+// matchScore computes a match score between two lines, combining prefix matching
+// and Levenshtein similarity into a single score. Prefix matches get a bonus to
+// ensure "partial" → "partial content completed" always wins over fuzzy matches.
+func matchScore(oldLine, newLine string) float64 {
+	if oldLine == "" || newLine == "" {
+		return 0.0
+	}
+	trimmed := strings.TrimRight(oldLine, " \t")
+	if trimmed != "" && strings.HasPrefix(newLine, trimmed) {
+		return 1.0
+	}
+	return LineSimilarity(oldLine, newLine)
+}
+
+// findBestMatch finds the best matching line in insertedLines for the given deletedLine.
+// Returns the index of the best match and its score.
 func findBestMatch(deletedLine string, insertedLines []string, usedInserts map[int]bool) (int, float64) {
 	bestIdx := -1
-	bestSimilarity := 0.0
+	bestScore := 0.0
 
 	for i, insertedLine := range insertedLines {
 		if usedInserts[i] {
 			continue
 		}
-
-		similarity := LineSimilarity(deletedLine, insertedLine)
-		if similarity > bestSimilarity {
-			bestSimilarity = similarity
+		score := matchScore(deletedLine, insertedLine)
+		if score > bestScore {
+			bestScore = score
 			bestIdx = i
 		}
 	}
 
-	return bestIdx, bestSimilarity
+	return bestIdx, bestScore
 }
 
 // processLineDiffsWithMapping processes line-level diffs and builds the coordinate mapping.
@@ -474,70 +487,41 @@ func handleModificationsWithMapping(deletedLines, insertedLines []string,
 		return
 	}
 
-	// Unequal number of lines - use similarity-based matching
+	// Unequal number of lines — single-pass greedy matching using combined scoring
+	// (prefix match + Levenshtein similarity), then emit modifications/deletions/additions.
 	usedInserts := make(map[int]bool)
-	usedDeletes := make(map[int]bool)
+	matches := make(map[int]int) // deleted index → inserted index
 
-	matches := make(map[int]int) // maps deleted index to inserted index
-
-	// First pass: Prefix matching (deleted line is a prefix of inserted line).
-	// This catches cases like "partial" → "partial content completed" where
-	// Levenshtein similarity is below threshold but the match is unambiguous.
 	for i, deletedLine := range deletedLines {
-		if usedDeletes[i] || deletedLine == "" || strings.TrimSpace(deletedLine) == "" {
+		if deletedLine == "" || strings.TrimSpace(deletedLine) == "" {
 			continue
 		}
-		trimmed := strings.TrimRight(deletedLine, " \t")
-		for j, insertedLine := range insertedLines {
-			if usedInserts[j] {
-				continue
-			}
-			if strings.HasPrefix(insertedLine, trimmed) {
-				matches[i] = j
-				usedInserts[j] = true
-				usedDeletes[i] = true
-				break
-			}
-		}
-	}
-
-	// Second pass: Match similar non-empty lines with similarity threshold
-	for i, deletedLine := range deletedLines {
-		if usedDeletes[i] || deletedLine == "" || strings.TrimSpace(deletedLine) == "" {
-			continue
-		}
-
-		bestIdx, bestSimilarity := findBestMatch(deletedLine, insertedLines, usedInserts)
-		if bestIdx != -1 && bestSimilarity >= SimilarityThreshold {
+		bestIdx, bestScore := findBestMatch(deletedLine, insertedLines, usedInserts)
+		if bestIdx != -1 && bestScore >= SimilarityThreshold {
 			matches[i] = bestIdx
 			usedInserts[bestIdx] = true
-			usedDeletes[i] = true
 		}
 	}
 
-	// Third pass: Process matched pairs as modifications and update mapping
+	// Emit matched pairs as modifications
 	for delIdx, insIdx := range matches {
 		oldIdx := oldLineStart + delIdx
 		newIdx := newLineStart + insIdx
-
-		// Update mapping for matched pairs
 		if newIdx < newLineCount {
 			newToOld[newIdx] = oldIdx + 1
 		}
 		if oldIdx < oldLineCount {
 			oldToNew[oldIdx] = newIdx + 1
 		}
-
 		result.addModification(oldIdx+1, newIdx+1, deletedLines[delIdx], insertedLines[insIdx])
 	}
 
-	// Fourth pass: Handle unmatched deletions (oldToNew stays -1)
+	// Emit unmatched deletions
 	for i, deletedLine := range deletedLines {
-		if usedDeletes[i] {
+		if _, matched := matches[i]; matched {
 			continue
 		}
 		oldIdx := oldLineStart + i
-		// Anchor to nearest mapped new line
 		anchorNew := -1
 		if newLineStart > 0 {
 			anchorNew = newLineStart
@@ -545,12 +529,7 @@ func handleModificationsWithMapping(deletedLines, insertedLines []string,
 		result.addDeletion(oldIdx+1, anchorNew, deletedLine)
 	}
 
-	// Fifth pass: Handle unmatched additions (newToOld stays -1)
-	// For each unmatched addition, find the nearest preceding matched insert
-	// to determine the correct anchor. Additions before any match have no anchor
-	// (anchorOld=-1), so GetBufferLine will use the forward walk to find the
-	// correct insertion point. Additions after a match anchor to the matched
-	// old line, placing them after it.
+	// Emit unmatched additions, anchored to the nearest preceding matched old line
 	for i, insertedLine := range insertedLines {
 		if usedInserts[i] {
 			continue
@@ -559,7 +538,7 @@ func handleModificationsWithMapping(deletedLines, insertedLines []string,
 		anchorOld := -1
 		for delIdx, insIdx := range matches {
 			if insIdx < i {
-				candidate := oldLineStart + delIdx + 1 // 1-indexed
+				candidate := oldLineStart + delIdx + 1
 				if candidate > anchorOld {
 					anchorOld = candidate
 				}

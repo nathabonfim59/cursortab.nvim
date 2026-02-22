@@ -178,16 +178,21 @@ func (e *Engine) advanceStagedCompletion() {
 	// Calculate cumulative offset from current stage
 	currentStage := e.getStage(e.stagedCompletion.CurrentIdx)
 	if currentStage != nil {
-		// A stage is a pure insertion only when all groups are additions AND the
-		// stage doesn't span multiple old lines. When BufferStart != BufferEnd,
-		// the stage replaces old lines (even if all changes are additions).
+		// A stage is a pure insertion only when all groups are additions,
+		// the stage targets a single old line, and the total group lines
+		// match the stage lines (no absorbed unchanged old lines).
 		isPureInsertion := currentStage.BufferStart == currentStage.BufferEnd && len(currentStage.Groups) > 0
 		if isPureInsertion {
+			groupLines := 0
 			for _, g := range currentStage.Groups {
 				if g.Type != "addition" {
 					isPureInsertion = false
 					break
 				}
+				groupLines += g.EndLine - g.StartLine + 1
+			}
+			if isPureInsertion && len(currentStage.Lines) != groupLines {
+				isPureInsertion = false
 			}
 		}
 

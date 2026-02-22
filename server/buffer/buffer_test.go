@@ -299,14 +299,20 @@ func TestComputeReplaceEnd(t *testing.T) {
 		{Type: "modification", StartLine: 1, EndLine: 1, BufferLine: 6},
 	}
 
-	// Pure insertion: all additions, single old line
-	assert.Equal(t, 5, computeReplaceEnd(6, 6, additionGroups), "single line additions → insert")
+	// Pure insertion: all additions, single old line, line count matches groups
+	pureLines := []string{"a", "b", "c"} // 3 lines = group total (2+1)
+	assert.Equal(t, 5, computeReplaceEnd(6, 6, pureLines, additionGroups), "single line additions → insert")
 
 	// All additions but spanning multiple old lines → must replace
-	assert.Equal(t, 7, computeReplaceEnd(6, 7, additionGroups), "multi-line additions → replace")
+	assert.Equal(t, 7, computeReplaceEnd(6, 7, pureLines, additionGroups), "multi-line additions → replace")
+
+	// All additions, single old line, but lines exceed group count → replace
+	extraLines := []string{"a", "b", "c", "d"} // 4 lines > group total (3)
+	assert.Equal(t, 6, computeReplaceEnd(6, 6, extraLines, additionGroups), "additions with absorbed old lines → replace")
 
 	// Modification groups → replace
-	assert.Equal(t, 6, computeReplaceEnd(6, 6, modificationGroups), "modification → replace")
+	modLines := []string{"a"}
+	assert.Equal(t, 6, computeReplaceEnd(6, 6, modLines, modificationGroups), "modification → replace")
 }
 
 // --- isPureInsertion Tests ---

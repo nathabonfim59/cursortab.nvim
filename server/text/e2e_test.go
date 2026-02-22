@@ -8,6 +8,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -27,12 +28,7 @@ type multiStringFlag []string
 func (f *multiStringFlag) String() string     { return strings.Join(*f, ",") }
 func (f *multiStringFlag) Set(v string) error { *f = append(*f, v); return nil }
 func (f multiStringFlag) contains(v string) bool {
-	for _, s := range f {
-		if s == v {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(f, v)
 }
 
 type fixtureParams struct {
@@ -52,7 +48,81 @@ type fixtureResult struct {
 	IncrementalActual []map[string]any
 	BatchPass         bool
 	IncrementalPass   bool
+	ApplyPass         bool
+	ApplyLines        []string
 	Verified          bool
+}
+
+// stageIsPureInsertion checks if a stage is a pure insertion (insert without
+// replacing any old lines). Mirrors computeReplaceEnd in buffer.go.
+func stageIsPureInsertion(stage *Stage) bool {
+	if stage.BufferStart != stage.BufferEnd || len(stage.Groups) == 0 {
+		return false
+	}
+	groupLines := 0
+	for _, g := range stage.Groups {
+		if g.Type != "addition" {
+			return false
+		}
+		groupLines += g.EndLine - g.StartLine + 1
+	}
+	return len(stage.Lines) == groupLines
+}
+
+// testBuffer simulates Neovim's buffer for apply verification.
+type testBuffer struct {
+	lines []string
+}
+
+// applyStage simulates nvim_buf_set_lines for a stage.
+func (b *testBuffer) applyStage(stage *Stage) {
+	isPureInsertion := stageIsPureInsertion(stage)
+
+	start := stage.BufferStart - 1 // 0-indexed
+	if isPureInsertion {
+		// Insert without replacing: splice at start
+		newLines := make([]string, 0, len(b.lines)+len(stage.Lines))
+		newLines = append(newLines, b.lines[:start]...)
+		newLines = append(newLines, stage.Lines...)
+		newLines = append(newLines, b.lines[start:]...)
+		b.lines = newLines
+	} else {
+		// Replace [start, end] inclusive with stage.Lines
+		end := stage.BufferEnd // 1-indexed inclusive → 0-indexed exclusive
+		newLines := make([]string, 0, len(b.lines)-end+start+len(stage.Lines))
+		newLines = append(newLines, b.lines[:start]...)
+		newLines = append(newLines, stage.Lines...)
+		if end < len(b.lines) {
+			newLines = append(newLines, b.lines[end:]...)
+		}
+		b.lines = newLines
+	}
+}
+
+// advanceOffsets applies the offset from the applied stage to remaining stages,
+// mirroring advanceStagedCompletion in engine/accept.go.
+func advanceOffsets(stages []*Stage, appliedIdx int) {
+	stage := stages[appliedIdx]
+
+	isPureInsertion := stageIsPureInsertion(stage)
+
+	var oldLineCount int
+	if isPureInsertion {
+		oldLineCount = 0
+	} else {
+		oldLineCount = stage.BufferEnd - stage.BufferStart + 1
+	}
+	offset := len(stage.Lines) - oldLineCount
+
+	if offset != 0 {
+		for i := appliedIdx + 1; i < len(stages); i++ {
+			stages[i].BufferStart += offset
+			stages[i].BufferEnd += offset
+			for _, g := range stages[i].Groups {
+				g.BufferLine += offset
+			}
+		}
+	}
 }
 
 func sha256Hex(data []byte) string {
@@ -176,6 +246,32 @@ func TestE2E(t *testing.T) {
 				}
 			}
 
+			// --- Apply verification ---
+			applyPass := true
+			var applyLines []string
+			if batchResult != nil && len(batchResult.Stages) > 0 {
+				buf := &testBuffer{lines: append([]string{}, oldLines...)}
+				stageCopies := make([]*Stage, len(batchResult.Stages))
+				for i, s := range batchResult.Stages {
+					cp := *s
+					cp.Groups = make([]*Group, len(s.Groups))
+					for j, g := range s.Groups {
+						gCopy := *g
+						cp.Groups[j] = &gCopy
+					}
+					stageCopies[i] = &cp
+				}
+				for i := range stageCopies {
+					buf.applyStage(stageCopies[i])
+					advanceOffsets(stageCopies, i)
+				}
+				applyLines = buf.lines
+				if !slicesEqual(applyLines, newLines) {
+					applyPass = false
+					t.Errorf("apply result mismatch:\n  got:  %v\n  want: %v", applyLines, newLines)
+				}
+			}
+
 			// --- Update or compare ---
 			expectedPath := filepath.Join(dir, "expected.json")
 
@@ -229,6 +325,8 @@ func TestE2E(t *testing.T) {
 				IncrementalActual: incLua,
 				BatchPass:         batchJSON == expectedJSON,
 				IncrementalPass:   incJSON == expectedJSON,
+				ApplyPass:         applyPass,
+				ApplyLines:        applyLines,
 				Verified:          verified,
 			}
 			fixtures = append(fixtures, fr)
@@ -257,6 +355,18 @@ func TestE2E(t *testing.T) {
 	} else {
 		t.Logf("report: %s", reportPath)
 	}
+}
+
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func toJSON(t *testing.T, v any) string {

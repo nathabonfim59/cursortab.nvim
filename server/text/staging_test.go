@@ -1056,7 +1056,7 @@ func TestGetStageBufferRange_AdditionsAtEndOfFile(t *testing.T) {
 	startLine, endLine := getStageBufferRange(stage, 1, diff, nil)
 
 	assert.Equal(t, 8, startLine, "buffer start line")
-	assert.Equal(t, 10, endLine, "buffer end line should extend to end of original buffer")
+	assert.Equal(t, 8, endLine, "buffer end covers modification + addition anchor")
 }
 
 func TestGetStageBufferRange_AdditionsWithinBuffer(t *testing.T) {
@@ -1095,7 +1095,7 @@ func TestCreateStages_AdditionsAtEndOfFile(t *testing.T) {
 	// End-to-end test: stage should have correct buffer range when
 	// additions extend beyond the original buffer.
 
-	// Scenario: 15-line file with changes at lines 12-18 (modification + 5 additions)
+	// Scenario: 15-line file with changes at lines 12-18 (modification + 6 additions)
 	diff := &DiffResult{
 		Changes: map[int]LineChange{
 			12: {Type: ChangeModification, NewLineNum: 12, OldLineNum: 12, Content: "modified", OldContent: "original"},
@@ -1108,6 +1108,11 @@ func TestCreateStages_AdditionsAtEndOfFile(t *testing.T) {
 		},
 		OldLineCount: 15,
 		NewLineCount: 21,
+		LineMapping: &LineMapping{
+			// Old 1-11 → new 1-11, old 12 → new 12 (modified), old 13-15 → new 19-21
+			OldToNew: []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 19, 20, 21},
+			NewToOld: []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, -1, -1, -1, -1, -1, -1, 13, 14, 15},
+		},
 	}
 
 	newLines := make([]string, 21)
@@ -1151,7 +1156,7 @@ func TestCreateStages_AdditionsAtEndOfFile(t *testing.T) {
 	assert.NotNil(t, stage, "should have stage at line 12+")
 	if stage != nil {
 		assert.Equal(t, 12, stage.BufferStart, "stage BufferStart")
-		assert.Equal(t, 15, stage.BufferEnd, "stage BufferEnd should extend to end of original buffer")
+		assert.Equal(t, 12, stage.BufferEnd, "stage BufferEnd should cover the modified old line")
 		assert.Equal(t, 7, stage.Lines, "stage should have 7 lines (new lines 12-18)")
 	}
 }
@@ -1247,7 +1252,7 @@ func TestGetStageBufferRange_OnlyAdditionsBeyondBuffer(t *testing.T) {
 
 	// Pure additions with anchor at line 10: insertion point is anchor + 1 = 11
 	assert.Equal(t, 11, startLine, "buffer start should be insertion point (anchor + 1)")
-	assert.Equal(t, 10, endLine, "buffer end should be last old line in range")
+	assert.Equal(t, 11, endLine, "buffer end equals start for pure additions (anchor + 1)")
 }
 
 func TestCreateStages_EmptyNewLines(t *testing.T) {
@@ -1330,10 +1335,9 @@ func TestGetStageBufferRange_AllAdditionsNoValidAnchor(t *testing.T) {
 
 	startLine, endLine := getStageBufferRange(stage, 1, diff, nil)
 
-	// Should fall back to stage.startLine + baseLineOffset - 1 = 5 + 1 - 1 = 5
+	// Anchorless additions with no mapping: falls back to stage start/end lines
 	assert.Equal(t, 5, startLine, "should fallback to stage.startLine")
-	// For pure additions, maxOldLine = minOldLine
-	assert.Equal(t, 5, endLine, "should equal startLine for pure additions")
+	assert.Equal(t, 7, endLine, "should fallback to stage.endLine")
 }
 
 func TestGetStageBufferRange_BaseLineOffsetZero(t *testing.T) {
@@ -1573,23 +1577,19 @@ func TestCreateStages_NoViewportInfo(t *testing.T) {
 	assert.Equal(t, 10, result.Stages[0].BufferStart, "closer stage first")
 }
 
-func TestGetStageNewLineRange_NoNewLineNum(t *testing.T) {
-	// Edge case: changes have NewLineNum=0, should fallback to stage coordinates
-
-	stage := &Stage{
-		startLine: 5,
-		endLine:   10,
-		rawChanges: map[int]LineChange{
-			5: {Type: ChangeModification, NewLineNum: 0, OldLineNum: 5, Content: "mod"},
-			7: {Type: ChangeModification, NewLineNum: 0, OldLineNum: 7, Content: "mod"},
-		},
+func TestGetStageNewLineRange_DerivedFromOldRange(t *testing.T) {
+	// New range is derived from old range using the LineMapping.
+	// Old lines 5-7, where old 6 is deleted → new has lines 5 and 7 (shifted).
+	mapping := &LineMapping{
+		OldToNew: []int{1, 2, 3, 4, -1, 5, 6, 7, 8, 9},
+		NewToOld: []int{1, 2, 3, 4, 6, 7, 8, 9, 10},
 	}
-
-	startLine, endLine := getStageNewLineRange(stage)
-
-	// Should fallback to stage.startLine and stage.endLine
-	assert.Equal(t, 5, startLine, "should fallback to stage.startLine")
-	assert.Equal(t, 10, endLine, "should fallback to stage.endLine")
+	// bufStart=5, bufEnd=7, baseLineOffset=1 → oldRel 5..7
+	// Line before: OldToNew[3]=4 → newStart=5
+	// Line after: OldToNew[7]=7 → newEnd=6
+	newStart, newEnd := getStageNewLineRange(5, 7, 1, false, mapping)
+	assert.Equal(t, 5, newStart, "newStart")
+	assert.Equal(t, 6, newEnd, "newEnd")
 }
 
 func TestFinalizeStages_SingleDeletion(t *testing.T) {
@@ -1995,9 +1995,9 @@ func TestPureAdditionsAfterExistingContent(t *testing.T) {
 	assert.Equal(t, 3, stage.BufferStart,
 		fmt.Sprintf("BufferStart should be 3 (insertion point), got %d", stage.BufferStart))
 
-	// BufferEnd is 2 (last old line) — for pure additions, end < start signals insertion
-	assert.Equal(t, 2, stage.BufferEnd,
-		fmt.Sprintf("BufferEnd should be 2 (last old line), got %d", stage.BufferEnd))
+	// BufferEnd equals BufferStart for pure same-anchor additions (insertion semantics)
+	assert.Equal(t, 3, stage.BufferEnd,
+		fmt.Sprintf("BufferEnd should equal BufferStart for pure insertion, got %d", stage.BufferEnd))
 }
 
 // TestMixedDeletionAndAdditions verifies correct staging when old content has a

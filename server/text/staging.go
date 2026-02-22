@@ -199,104 +199,205 @@ func stageDistanceFromCursor(stage *Stage, cursorRow int) int {
 	return cursorRow - stage.BufferEnd
 }
 
-// getStageBufferRange determines the buffer line range for a stage using coordinate mapping.
-// If bufferLines is non-nil, it will be populated with lineNum -> bufferLine mappings.
+// getStageBufferRange computes the buffer line range (old coordinates) for a
+// stage and optionally populates lineNum→bufferLine mappings for UI rendering.
+//
+// The returned range [bufStart, bufEnd] defines which old buffer lines get
+// replaced by Stage.Lines via SetBufferLines. For pure insertions (all
+// additions from the same anchor), bufStart == bufEnd and no old lines are
+// replaced.
+//
+// For additions, OldLineNum is the anchor (line before insertion). In mixed
+// stages the anchor extends the old range so that the replacement captures
+// the correct new-file content between surrounding unchanged lines.
 func getStageBufferRange(stage *Stage, baseLineOffset int, diff *DiffResult, bufferLines map[int]int) (int, int) {
-	minOldLine := -1
-	maxOldLine := -1
-	minOldLineFromNonAdditions := -1
-	hasAdditions := false
-	hasNonAdditions := false
-	maxNewLineNum := 0
-
-	for lineNum, change := range stage.rawChanges {
-		bufferLine := diff.LineMapping.GetBufferLine(change, lineNum, baseLineOffset)
-		if bufferLines != nil {
-			bufferLines[lineNum] = bufferLine
+	// Populate buffer line mappings for UI group positioning
+	if bufferLines != nil {
+		for lineNum, change := range stage.rawChanges {
+			bufferLines[lineNum] = diff.LineMapping.GetBufferLine(change, lineNum, baseLineOffset)
 		}
+	}
 
-		isAddition := change.Type == ChangeAddition
+	minOldNonAdd := -1
+	maxOldNonAdd := -1
+	minAnchor := -1
+	maxAnchor := -1
+	hasNonAdditions := false
+	hasAdditions := false
 
-		if isAddition {
+	for _, change := range stage.rawChanges {
+		if change.Type == ChangeAddition {
 			hasAdditions = true
-			if change.NewLineNum > maxNewLineNum {
-				maxNewLineNum = change.NewLineNum
-			}
-			hasValidAnchor := change.OldLineNum > 0 ||
-				(diff.LineMapping != nil && change.NewLineNum > 0)
-			if hasValidAnchor {
-				if minOldLine == -1 || bufferLine < minOldLine {
-					minOldLine = bufferLine
+			if change.OldLineNum > 0 {
+				if minAnchor == -1 || change.OldLineNum < minAnchor {
+					minAnchor = change.OldLineNum
+				}
+				if change.OldLineNum > maxAnchor {
+					maxAnchor = change.OldLineNum
 				}
 			}
 		} else {
 			hasNonAdditions = true
-			if minOldLineFromNonAdditions == -1 || bufferLine < minOldLineFromNonAdditions {
-				minOldLineFromNonAdditions = bufferLine
-			}
-			if minOldLine == -1 || bufferLine < minOldLine {
-				minOldLine = bufferLine
-			}
-			if bufferLine > maxOldLine {
-				maxOldLine = bufferLine
+			if change.OldLineNum > 0 {
+				if minOldNonAdd == -1 || change.OldLineNum < minOldNonAdd {
+					minOldNonAdd = change.OldLineNum
+				}
+				if change.OldLineNum > maxOldNonAdd {
+					maxOldNonAdd = change.OldLineNum
+				}
 			}
 		}
 	}
 
-	if hasAdditions && hasNonAdditions && minOldLineFromNonAdditions > 0 {
-		minOldLine = minOldLineFromNonAdditions
-	}
+	var oldStart, oldEnd int
 
-	if hasAdditions && diff.OldLineCount > 0 {
-		lastOldLineInRange := baseLineOffset + diff.OldLineCount - 1
-		if maxNewLineNum > diff.OldLineCount && maxOldLine < lastOldLineInRange {
-			maxOldLine = lastOldLineInRange
-		}
-	}
-
-	if minOldLine == -1 {
-		minOldLine = stage.startLine + baseLineOffset - 1
-	}
-	if maxOldLine == -1 {
-		if hasAdditions && !hasNonAdditions {
-			maxOldLine = minOldLine
+	if !hasNonAdditions && hasAdditions {
+		// Pure additions: anchor is the old line before insertion
+		if minAnchor == maxAnchor {
+			// All anchored at the same line → pure insertion point
+			oldStart = minAnchor + 1
+			oldEnd = minAnchor + 1
 		} else {
-			maxOldLine = stage.endLine + baseLineOffset - 1
+			// Different anchors → must replace old lines between them
+			oldStart = minAnchor + 1
+			oldEnd = maxAnchor
+		}
+	} else if !hasAdditions {
+		// No additions: range covers modified/deleted old lines
+		oldStart = minOldNonAdd
+		oldEnd = maxOldNonAdd
+	} else {
+		// Mixed: start with non-addition range, extend for addition anchors
+		oldStart = minOldNonAdd
+		oldEnd = maxOldNonAdd
+		for _, change := range stage.rawChanges {
+			if change.Type == ChangeAddition && change.OldLineNum > 0 {
+				if change.OldLineNum >= oldEnd {
+					oldEnd = change.OldLineNum
+				}
+				if change.OldLineNum+1 < oldStart {
+					oldStart = change.OldLineNum + 1
+				}
+			}
 		}
 	}
 
-	return minOldLine, maxOldLine
+	// For anchorless additions (OldLineNum=-1), derive the insertion
+	// point from the LineMapping using the change's NewLineNum.
+	if oldStart <= 0 && diff.LineMapping != nil {
+		for _, change := range stage.rawChanges {
+			if change.NewLineNum > 0 && change.NewLineNum <= len(diff.LineMapping.NewToOld) {
+				// Walk forward from NewLineNum to find the next mapped old line
+				for i := change.NewLineNum - 1; i < len(diff.LineMapping.NewToOld); i++ {
+					if diff.LineMapping.NewToOld[i] > 0 {
+						pos := diff.LineMapping.NewToOld[i]
+						if oldStart <= 0 || pos < oldStart {
+							oldStart = pos
+						}
+						break
+					}
+				}
+				// If no forward match, insertion is past last old line
+				if oldStart <= 0 {
+					oldStart = len(diff.LineMapping.OldToNew) + 1
+				}
+			}
+		}
+	}
+	if oldEnd <= 0 {
+		oldEnd = oldStart
+	}
+	if oldStart <= 0 {
+		oldStart = stage.startLine
+	}
+	if oldEnd <= 0 {
+		oldEnd = stage.endLine
+	}
+
+	return oldStart + baseLineOffset - 1, oldEnd + baseLineOffset - 1
 }
 
-// getStageNewLineRange determines the new line range for content extraction.
-// Deletions are excluded because their NewLineNum is only an anchor point,
-// not a position in the new content.
-func getStageNewLineRange(stage *Stage) (int, int) {
-	minNewLine := -1
-	maxNewLine := -1
+// getStageNewLineRange derives the new-file line range from the old-file range
+// using the LineMapping. This ensures the ranges are aligned: replacing
+// old[bufStart:bufEnd] with new[newStart:newEnd] produces the correct result.
+//
+// For pure deletions the new range is empty (newStart > newEnd), producing
+// an empty Stage.Lines that deletes the old lines.
+func getStageNewLineRange(bufStart, bufEnd, baseLineOffset int, isPureInsertion bool, mapping *LineMapping) (int, int) {
+	if mapping == nil {
+		return bufStart - baseLineOffset + 1, bufEnd - baseLineOffset + 1
+	}
 
-	for _, change := range stage.rawChanges {
-		if change.Type == ChangeDeletion {
-			continue
-		}
-		if change.NewLineNum > 0 {
-			if minNewLine == -1 || change.NewLineNum < minNewLine {
-				minNewLine = change.NewLineNum
+	oldRelStart := bufStart - baseLineOffset + 1
+	oldRelEnd := bufEnd - baseLineOffset + 1
+
+	// For pure insertion, no old lines are replaced: the suffix starts at
+	// oldRelStart (the insertion point). For replacement, old lines
+	// [oldRelStart, oldRelEnd] are consumed, so the suffix starts at
+	// oldRelEnd + 1.
+	suffixOldLine := oldRelEnd + 1
+	if isPureInsertion {
+		suffixOldLine = oldRelStart
+	}
+
+	// newStart = first new line after the last preserved old line before the range
+	var newStart int
+	if oldRelStart > 1 {
+		prev := -1
+		for i := min(oldRelStart-2, len(mapping.OldToNew)-1); i >= 0; i-- {
+			if mapping.OldToNew[i] != -1 {
+				prev = mapping.OldToNew[i]
+				break
 			}
-			if change.NewLineNum > maxNewLine {
-				maxNewLine = change.NewLineNum
+		}
+		if prev == -1 {
+			newStart = 1
+		} else {
+			newStart = prev + 1
+		}
+	} else {
+		newStart = 1
+	}
+
+	// newEnd = last new line before the first preserved old line after the range
+	var newEnd int
+	suffixIdx := suffixOldLine - 1 // 0-indexed into OldToNew
+	if suffixIdx < len(mapping.OldToNew) {
+		next := -1
+		for i := suffixIdx; i < len(mapping.OldToNew); i++ {
+			if mapping.OldToNew[i] != -1 {
+				next = mapping.OldToNew[i]
+				break
 			}
 		}
+		if next == -1 {
+			newEnd = len(mapping.NewToOld)
+		} else {
+			newEnd = next - 1
+		}
+	} else {
+		newEnd = len(mapping.NewToOld)
 	}
 
-	if minNewLine == -1 {
-		minNewLine = stage.startLine
-	}
-	if maxNewLine == -1 {
-		maxNewLine = stage.endLine
-	}
+	return newStart, newEnd
+}
 
-	return minNewLine, maxNewLine
+// isSameAnchorAdditions returns true if all changes are additions anchored
+// at the same old line. This is the condition for a pure insertion where
+// SetBufferLines inserts without replacing any existing lines.
+func isSameAnchorAdditions(changes map[int]LineChange) bool {
+	anchor := -1
+	for _, c := range changes {
+		if c.Type != ChangeAddition {
+			return false
+		}
+		if anchor == -1 {
+			anchor = c.OldLineNum
+		} else if c.OldLineNum != anchor {
+			return false
+		}
+	}
+	return anchor >= 0
 }
 
 // finalizeStages populates the remaining fields of partial stages.
@@ -310,8 +411,9 @@ func finalizeStages(stages []*Stage, newLines []string, filePath string, baseLin
 		lineNumToBufferLine := make(map[int]int)
 		getStageBufferRange(stage, baseLineOffset, diff, lineNumToBufferLine)
 
-		// Get new line range for content extraction
-		newStartLine, newEndLine := getStageNewLineRange(stage)
+		// Derive new line range from old range via LineMapping
+		isPureInsert := stage.BufferStart == stage.BufferEnd && isSameAnchorAdditions(stage.rawChanges)
+		newStartLine, newEndLine := getStageNewLineRange(stage.BufferStart, stage.BufferEnd, baseLineOffset, isPureInsert, diff.LineMapping)
 
 		// Extract the new content using new coordinates
 		var stageLines []string

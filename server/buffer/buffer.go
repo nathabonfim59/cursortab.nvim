@@ -308,7 +308,7 @@ func (b *NvimBuffer) PrepareCompletion(startLine, endLineInc int, lines []string
 
 	// Groups are pre-computed by staging with BufferLine already set
 
-	replaceEnd := computeReplaceEnd(startLine, endLineInc, groups)
+	replaceEnd := computeReplaceEnd(startLine, endLineInc, lines, groups)
 	applyBatch := b.getApplyBatch(startLine, replaceEnd, lines, diffResult)
 
 	// Convert to Lua format
@@ -770,12 +770,22 @@ func isPureInsertion(groups []*text.Group) bool {
 }
 
 // computeReplaceEnd returns the end line for nvim_buf_set_lines. For pure
-// insertions (all addition groups, single old line), it returns startLine-1
-// so nvim inserts without replacing. Otherwise it returns endLineInc to
-// replace the old line range.
-func computeReplaceEnd(startLine, endLineInc int, groups []*text.Group) int {
+// insertions (all addition groups whose total line count matches the stage
+// lines, on a single old line), it returns startLine-1 so nvim inserts
+// without replacing. Otherwise it returns endLineInc to replace the old
+// line range.
+func computeReplaceEnd(startLine, endLineInc int, lines []string, groups []*text.Group) int {
 	if isPureInsertion(groups) && startLine == endLineInc {
-		return startLine - 1
+		// Verify that all lines are accounted for by addition groups.
+		// When the stage absorbs unchanged old lines between additions,
+		// len(lines) exceeds the group line count and it's a replacement.
+		groupLines := 0
+		for _, g := range groups {
+			groupLines += g.EndLine - g.StartLine + 1
+		}
+		if len(lines) == groupLines {
+			return startLine - 1
+		}
 	}
 	return endLineInc
 }

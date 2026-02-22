@@ -506,6 +506,7 @@ pre { font-family: 'JetBrains Mono', monospace; font-size: 13px; margin: 0; }
 .del-hl { background: #67060c; color: #ffa198; }
 .add-hl { background: #0f5323; color: #7ee787; }
 .side { font-style: italic; opacity: 0.85; }
+.apply-section { border-top: 1px solid #30363d; background: #0d1117; }
 .json-section { border-top: 1px solid #30363d; background: #0d1117; }
 .json-col { min-width: 0; padding: 8px; overflow-x: auto; }
 .json-col + .json-col { border-left: 1px solid #30363d; }
@@ -527,7 +528,7 @@ pre { font-family: 'JetBrains Mono', monospace; font-size: 13px; margin: 0; }
 	var totalFixtures, allPass, statusFailed, statusUnverified int
 	for _, f := range fixtures {
 		totalFixtures++
-		if !f.BatchPass || !f.IncrementalPass {
+		if !f.BatchPass || !f.IncrementalPass || !f.ApplyPass {
 			statusFailed++
 		} else if !f.Verified {
 			statusUnverified++
@@ -564,21 +565,25 @@ pre { font-family: 'JetBrains Mono', monospace; font-size: 13px; margin: 0; }
 		if !f.IncrementalPass {
 			iStatus = `<span class="fail">inc:FAIL</span>`
 		}
+		aStatus := `<span class="pass">apply:pass</span>`
+		if !f.ApplyPass {
+			aStatus = `<span class="fail">apply:FAIL</span>`
+		}
 		vStatus := `<span class="pass">verified</span>`
 		if !f.Verified {
 			vStatus = `<span class="unverified">unverified</span>`
 		}
 
-		allPass := f.BatchPass && f.IncrementalPass && f.Verified
+		allPass := f.BatchPass && f.IncrementalPass && f.ApplyPass && f.Verified
 		escapedName := html.EscapeString(f.Name)
 		status := "passed"
-		if !f.BatchPass || !f.IncrementalPass {
+		if !f.BatchPass || !f.IncrementalPass || !f.ApplyPass {
 			status = "failed"
 		} else if !f.Verified {
 			status = "unverified"
 		}
-		fmt.Fprintf(&b, "<details class=\"fixture\" data-status=\"%s\" open>\n<summary class=\"hdr\"><h2>%s</h2><button class=\"copy-btn\" data-name=\"%s\" onclick=\"navigator.clipboard.writeText(this.dataset.name)\">copy</button> %s %s %s <span class=\"meta\">cursor=(%d,%d) vp=[%d,%d]</span></summary>\n",
-			status, escapedName, escapedName, vStatus, bStatus, iStatus,
+		fmt.Fprintf(&b, "<details class=\"fixture\" data-status=\"%s\" open>\n<summary class=\"hdr\"><h2>%s</h2><button class=\"copy-btn\" data-name=\"%s\" onclick=\"navigator.clipboard.writeText(this.dataset.name)\">copy</button> %s %s %s %s <span class=\"meta\">cursor=(%d,%d) vp=[%d,%d]</span></summary>\n",
+			status, escapedName, escapedName, vStatus, bStatus, iStatus, aStatus,
 			f.Params.CursorRow, f.Params.CursorCol,
 			f.Params.ViewportTop, f.Params.ViewportBottom)
 
@@ -586,6 +591,15 @@ pre { font-family: 'JetBrains Mono', monospace; font-size: 13px; margin: 0; }
 		renderPipelineCol(&b, "Batch", f.OldText, f.NewText, batchStages, f.Params.CursorRow, f.Params.CursorCol)
 		renderPipelineCol(&b, "Incremental", f.OldText, f.NewText, incStages, f.Params.CursorRow, f.Params.CursorCol)
 		b.WriteString("</div>\n")
+
+		if !f.ApplyPass && len(f.ApplyLines) > 0 {
+			b.WriteString("<div class=\"apply-section\">\n")
+			b.WriteString("<div class=\"cols-2\">\n")
+			renderTextPane(&b, "Applied (got)", f.ApplyLines, 0, -1)
+			renderTextPane(&b, "Expected (new.txt)", strings.Split(f.NewText, "\n"), 0, -1)
+			b.WriteString("</div>\n")
+			b.WriteString("</div>\n")
+		}
 
 		renderJSONSection(&b, f.BatchActual, f.IncrementalActual, !allPass)
 

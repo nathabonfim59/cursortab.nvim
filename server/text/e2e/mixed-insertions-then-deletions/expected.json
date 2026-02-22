@@ -27,12 +27,12 @@
       },
       {
         "buffer_line": 4,
-        "end_line": 5,
+        "end_line": 6,
         "lines": [
           "line D"
         ],
         "old_lines": null,
-        "start_line": 5,
+        "start_line": 6,
         "type": "deletion"
       }
     ],

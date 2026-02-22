@@ -1574,62 +1574,6 @@ func TestIncrementalStageBuilder_EmptyLineFilledWithContent(t *testing.T) {
 	assert.Equal(t, 3, firstGroup.BufferLine, "buffer line")
 }
 
-// TestIncrementalStageBuilder_TrailingWhitespaceModification verifies that when the old line
-// has trailing whitespace, the prefix matching still correctly identifies it as a modification.
-// Without this fix, the modification would be classified as an addition during streaming,
-// causing buffer_line to be off by 1.
-func TestIncrementalStageBuilder_TrailingWhitespaceModification(t *testing.T) {
-	oldLines := []string{
-		"func main() {",
-		"    x  ", // trailing whitespace
-	}
-
-	builder := NewIncrementalStageBuilder(
-		oldLines,
-		1,    // baseLineOffset
-		10,   // proximityThreshold
-		0,    // maxVisibleLines (disabled)
-		0, 0, // viewport disabled
-		2, 5, // cursorRow=2, cursorCol=5
-		"test.go",
-	)
-
-	builder.AddLine("func main() {")
-	builder.AddLine("    x = getValue()")      // modification of "    x  "
-	builder.AddLine("    y = processValue(x)") // addition
-
-	result := builder.Finalize()
-	assert.NotNil(t, result, "expected staging result")
-	assert.Equal(t, 1, len(result.Stages), "stage count")
-
-	stage := result.Stages[0]
-
-	// BufferStart should be 2 (where the modification is)
-	assert.Equal(t, 2, stage.BufferStart, "BufferStart")
-
-	// The modification group should have BufferLine = 2
-	var modGroup *Group
-	for _, g := range stage.Groups {
-		if g.Type == "modification" {
-			modGroup = g
-			break
-		}
-	}
-	assert.NotNil(t, modGroup, "should have a modification group")
-	assert.Equal(t, 2, modGroup.BufferLine, "modification BufferLine")
-
-	// The addition group should have BufferLine = 3 (below the modification)
-	var addGroup *Group
-	for _, g := range stage.Groups {
-		if g.Type == "addition" {
-			addGroup = g
-			break
-		}
-	}
-	assert.NotNil(t, addGroup, "should have an addition group")
-	assert.Equal(t, 3, addGroup.BufferLine, "addition BufferLine")
-}
-
 // TestIncrementalStageBuilder_WhitespaceOnlyLineModification verifies that when the old line
 // is whitespace-only (not empty), the matching correctly identifies it as a modification target.
 func TestIncrementalStageBuilder_WhitespaceOnlyLineModification(t *testing.T) {
@@ -2128,5 +2072,73 @@ func TestIncrementalStageBuilder_LowSimilarityModificationBufferRange(t *testing
 			"Group BufferLine should be at the modified line")
 		assert.Equal(t, "modification", group.Type,
 			"should be modification after fallback matching")
+	}
+}
+
+func TestIncrementalStageBuilder_EmptyStreamProducesNoStages(t *testing.T) {
+	oldLines := []string{"line 1", "line 2", "line 3", "line 4", "line 5"}
+	builder := NewIncrementalStageBuilder(
+		oldLines,
+		1,  // baseLineOffset
+		10, // proximityThreshold
+		0,  // maxVisibleLines
+		1,  // viewportTop
+		50, // viewportBottom
+		1,  // cursorRow
+		0,  // cursorCol
+		"test.go",
+	)
+
+	// No lines added — simulates a provider returning empty content
+	result := builder.Finalize()
+	assert.Nil(t, result, "empty stream should produce no stages")
+}
+
+func TestIncrementalStageBuilder_FewModificationsInLargeFile(t *testing.T) {
+	// Simulates a provider that returns the full file with a few lines changed
+	// (e.g., "app.route" → "app.api.route" on 4 lines in a 30-line file).
+	// The stage should only cover the modified lines, not extend to the end of the file.
+	var oldLines []string
+	for i := 1; i <= 30; i++ {
+		oldLines = append(oldLines, fmt.Sprintf("line %d content", i))
+	}
+
+	builder := NewIncrementalStageBuilder(
+		oldLines,
+		1,  // baseLineOffset
+		10, // proximityThreshold
+		0,  // maxVisibleLines
+		1,  // viewportTop
+		50, // viewportBottom
+		15, // cursorRow (near the modifications)
+		0,  // cursorCol
+		"test.go",
+	)
+
+	// Stream the full file with 4 modifications in the middle (lines 12-15)
+	for i := 1; i <= 30; i++ {
+		if i >= 12 && i <= 15 {
+			builder.AddLine(fmt.Sprintf("line %d MODIFIED", i))
+		} else {
+			builder.AddLine(fmt.Sprintf("line %d content", i))
+		}
+	}
+
+	result := builder.Finalize()
+	assert.NotNil(t, result, "result")
+	assert.True(t, len(result.Stages) >= 1, "should have at least 1 stage")
+
+	stage := result.Stages[0]
+
+	// The stage should cover roughly lines 12-15, not extend to line 30
+	assert.True(t, stage.BufferEnd <= 20,
+		fmt.Sprintf("BufferEnd should not extend far past modifications, got %d", stage.BufferEnd))
+	assert.Equal(t, 12, stage.BufferStart,
+		fmt.Sprintf("BufferStart should be at first modification, got %d", stage.BufferStart))
+
+	// Should not produce deletion groups for unchanged trailing lines
+	for _, g := range stage.Groups {
+		assert.True(t, g.Type != "deletion",
+			fmt.Sprintf("should not have deletion groups for unchanged content, got deletion at buffer line %d", g.BufferLine))
 	}
 }

@@ -479,6 +479,10 @@ func (b *IncrementalStageBuilder) computeCurrentBufferLine(lineNum int) int {
 func (b *IncrementalStageBuilder) Finalize() *StagingResult {
 	defer logger.Trace("IncrementalStageBuilder.Finalize")()
 
+	if len(b.diffBuilder.NewLines) == 0 {
+		return nil
+	}
+
 	oldText := JoinLines(b.OldLines)
 	newText := JoinLines(b.diffBuilder.NewLines)
 

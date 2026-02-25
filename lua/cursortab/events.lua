@@ -212,6 +212,11 @@ local function setup_autocommands()
 	-- Cursor movement events (normal mode)
 	vim.api.nvim_create_autocmd({ "CursorMoved" }, {
 		callback = function()
+			-- Only request completions in normal mode
+			local mode = vim.api.nvim_get_mode().mode:sub(1, 1)
+			if mode ~= "n" then
+				return
+			end
 			if handle_cursor_moved(false) then
 				return
 			end

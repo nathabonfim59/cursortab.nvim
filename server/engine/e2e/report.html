@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Engine E2E Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+body { font-family: sans-serif; background: #010409; color: #e6edf3; margin: 20px; }
+h1 { font-size: 16px; margin-bottom: 16px; display: flex; align-items: baseline; color: #f0f6fc; }
+.stats { font-size: 13px; font-weight: 400; margin-left: auto; display: flex; gap: 8px; }
+.fixture { border: 1px solid #30363d; margin-bottom: 24px; overflow: hidden; background: #0d1117; }
+.hdr { background: #161b22; padding: 12px 12px; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 13px; cursor: pointer; user-select: none; }
+.hdr-statuses { display: flex; flex-wrap: wrap; gap: 4px 8px; width: 100%; margin: 0; }
+.hdr h2 { font-size: 13px; font-weight: 600; color: #f0f6fc; margin: 0; }
+.copy-btn { background: none; border: 1px solid #30363d; color: #7d8590; cursor: pointer; padding: 2px 6px; font-size: 11px; line-height: 1; }
+.copy-btn:hover { color: #e6edf3; border-color: #545d68; }
+.filters { display: flex; gap: 6px; margin-bottom: 16px; }
+.filter-btn { background: #161b22; border: 1px solid #30363d; color: #7d8590; cursor: pointer; padding: 4px 10px; font-size: 12px; }
+.filter-btn:hover { color: #e6edf3; border-color: #545d68; }
+.filter-btn.active { color: #e6edf3; border-color: #e6edf3; }
+.pass { color: #3fb950; }
+.fail { color: #f85149; }
+.unverified { color: #d29922; }
+.meta { color: #7d8590; }
+.cols-2 { display: grid; grid-template-columns: 1fr 1fr; }
+.cols-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; }
+.pipelines { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid #30363d; }
+.pipeline-col { background: #0d1117; display: flex; flex-direction: column; }
+.pipeline-col + .pipeline-col { border-left: 1px solid #30363d; }
+.pipeline-label { background: #161b22; padding: 4px 10px; font-size: 12px; font-weight: 600; color: #e6edf3; }
+.pane { padding: 8px; overflow-x: auto; overflow-y: visible; border-top: 1px solid #30363d; }
+.pane + .pane { border-left: 1px solid #30363d; }
+.pane h3 { font-size: 11px; color: #7d8590; margin: 0 0 4px; }
+pre { font-family: 'JetBrains Mono', monospace; font-size: 13px; margin: 0; }
+.line { display: block; line-height: 1.4; padding: 1px 4px; }
+.ln { display: inline-block; width: 24px; text-align: right; color: #545d68; margin-right: 8px; user-select: none; }
+.del { background: #67060c; color: #ffa198; }
+.add { background: #0f5323; color: #7ee787; }
+.mod { background: #1a2332; color: #a5d6ff; }
+.ghost { color: #6e7681; }
+.cursor { background: #c9d1d9; color: #0d1117; }
+.del-hl { background: #67060c; color: #ffa198; }
+.add-hl { background: #0f5323; color: #7ee787; }
+.side { font-style: italic; opacity: 0.85; }
+.pane-expected { border-top: 1px dashed #30363d; }
+.pane-expected h3 { color: #d29922; }
+.apply-section { border-top: 1px solid #30363d; background: #0d1117; }
+.json-section { border-top: 1px solid #30363d; background: #0d1117; }
+.json-col { min-width: 0; padding: 8px; overflow-x: auto; }
+.json-col + .json-col { border-left: 1px solid #30363d; }
+.json-col h3 { font-size: 11px; color: #7d8590; margin-bottom: 4px; }
+.json-details { height: 100%; padding: 4px 8px; }
+.json-details summary { font-size: 12px; color: #7d8590; margin-bottom: 4px; cursor: pointer; user-select: none; font-weight: 600; }
+.json-details code { display: block; white-space: pre; font-family: 'JetBrains Mono', monospace; font-size: 12px; overflow-x: auto; overflow-y: visible; color: #e6edf3; }
+.json-details:not([open]) { display: flex; flex-direction: column; }
+.json-details:not([open]) code { display: none; }
+.json-details .shiki { background: #010409 !important; margin: 0; padding: 8px; overflow-x: auto; overflow-y: hidden; font-size: 12px; }
+.json-details .shiki code { line-height: 1.3; overflow-y: hidden; }
+.json-details .shiki code .line { display: inline; }
+.wrong-line { background: #5c1818; color: #ffa198; }
+.step-label { background: #161b22; padding: 6px 10px; font-size: 12px; font-weight: 600; color: #e6edf3; border-top: 1px solid #30363d; display: flex; gap: 8px; align-items: center; }
+.group-tag { display: inline-block; padding: 1px 6px; font-size: 11px; border-radius: 3px; }
+.group-tag.addition { background: #0f5323; color: #7ee787; }
+.group-tag.modification { background: #1a2332; color: #a5d6ff; }
+.group-tag.deletion { background: #67060c; color: #ffa198; }
+</style>
+</head>
+<body>
+<h1>Engine E2E Report <span class="stats"><span class="meta">2 fixtures</span><span class="pass">1 pass</span><span class="fail">1 fail</span></span></h1>
+<div class="filters">
+<button class="filter-btn active" data-filter="all">All (2)</button>
+<button class="filter-btn" data-filter="passed">Passed (1)</button>
+<button class="filter-btn" data-filter="failed">Failed (1)</button>
+</div>
+<details class="fixture" data-status="passed" open>
+<summary class="hdr"><h2>insertion-no-spurious-groups</h2><span class="pass">PASS</span><span class="meta">After accepting a streaming stage that inserts lines below cursor, a follow-up FIM completion with stale EndLineInc should not treat already-accepted buffer lines as changes</span></summary>
+<div class="step-label">Step 0: completion <span class="pass">PASS</span></div>
+<div class="step-label"><span class="meta">startLine=3 endLineInc=3 lines=7 → extractedEnd=9</span></div>
+<div class="cols-3">
+<div class="pane">
+<h3>Buffer</h3><pre><span class="line"><span class="ln">1</span>import numpy as np</span><span class="line"><span class="ln">2</span></span><span class="line mod"><span class="ln">3</span>def bubble_sort(arr):</span><span class="line wrong-line"><span class="ln">4</span>    n = len(arr)</span><span class="line wrong-line"><span class="ln">5</span>    for i in range(n):<span class="cursor"> </span></span><span class="line wrong-line"><span class="ln">6</span>        for j in range(0, n - i - 1):</span></pre></div>
+<div class="pane">
+<h3>Old (extracted)</h3><pre><span class="line"><span class="ln">3</span>def bubble_sort(arr):</span><span class="line wrong-line"><span class="ln">4</span>    n = len(arr)</span><span class="line wrong-line"><span class="ln">5</span>    for i in range(n):</span><span class="line wrong-line"><span class="ln">6</span>        for j in range(0, n - i - 1):</span></pre>
+<h3>New (completion)</h3><pre><span class="line add"><span class="ln">1</span>def bubble_sort(arr):</span><span class="line add"><span class="ln">2</span>    n = len(arr)</span><span class="line add"><span class="ln">3</span>    for i in range(n):</span><span class="line add"><span class="ln">4</span>        for j in range(0, n - i - 1):</span><span class="line add"><span class="ln">5</span>            if arr[j] &gt; arr[j + 1]:</span><span class="line add"><span class="ln">6</span>                arr[j], arr[j + 1] = arr[j + 1], arr[j]</span><span class="line add"><span class="ln">7</span>    return arr</span></pre></div>
+<div class="pane">
+<h3>After Accept</h3><pre><span class="line"><span class="ln">1</span>import numpy as np</span><span class="line"><span class="ln">2</span></span><span class="line"><span class="ln">3</span>def bubble_sort(arr):</span><span class="line"><span class="ln">4</span>    n = len(arr)</span><span class="line"><span class="ln">5</span>    for i in range(n):</span><span class="line"><span class="ln">6</span>        for j in range(0, n - i - 1):</span><span class="line"><span class="ln">7</span>            if arr[j] &gt; arr[j + 1]:</span><span class="line"><span class="ln">8</span>                arr[j], arr[j + 1] = arr[j + 1], arr[j]</span><span class="line"><span class="ln">9</span>    return arr</span></pre></div>
+</div>
+<div class="step-label">Groups: <span class="group-tag addition">addition @7</span> </div>
+<div class="json-section"><details class="json-details"><summary>JSON</summary>
+<code class="shiki-json">{
+  &#34;completion&#34;: {
+    &#34;startLine&#34;: 3,
+    &#34;endLineInc&#34;: 3,
+    &#34;lines&#34;: [
+      &#34;def bubble_sort(arr):&#34;,
+      &#34;    n = len(arr)&#34;,
+      &#34;    for i in range(n):&#34;,
+      &#34;        for j in range(0, n - i - 1):&#34;,
+      &#34;            if arr[j] \u003e arr[j + 1]:&#34;,
+      &#34;                arr[j], arr[j + 1] = arr[j + 1], arr[j]&#34;,
+      &#34;    return arr&#34;
+    ]
+  },
+  &#34;oldLines&#34;: [
+    &#34;def bubble_sort(arr):&#34;,
+    &#34;    n = len(arr)&#34;,
+    &#34;    for i in range(n):&#34;,
+    &#34;        for j in range(0, n - i - 1):&#34;
+  ],
+  &#34;stages&#34;: [
+    {
+      &#34;StartLine&#34;: 7,
+      &#34;Groups&#34;: [
+        {
+          &#34;Type&#34;: &#34;addition&#34;,
+          &#34;StartLine&#34;: 1,
+          &#34;EndLine&#34;: 3,
+          &#34;BufferLine&#34;: 7,
+          &#34;RenderHint&#34;: &#34;&#34;,
+          &#34;ColStart&#34;: 0,
+          &#34;ColEnd&#34;: 0,
+          &#34;Lines&#34;: [
+            &#34;            if arr[j] \u003e arr[j + 1]:&#34;,
+            &#34;                arr[j], arr[j + 1] = arr[j + 1], arr[j]&#34;,
+            &#34;    return arr&#34;
+          ]
+        }
+      ],
+      &#34;CursorLine&#34;: 3,
+      &#34;CursorCol&#34;: 14
+    }
+  ]
+}</code>
+</details></div>
+</details>
+<details class="fixture" data-status="failed" open>
+<summary class="hdr"><h2>prefetch-insertion-no-spurious-deletion</h2><span class="fail">FAIL</span><span class="meta">Prefetch completion inserting for-loop body (1 old line -&gt; 3 new lines) should not delete unrelated lines below. Reproduces issue #51.</span></summary>
+<div class="step-label">Step 0: prefetch <span class="fail">FAIL</span></div>
+<div class="step-label"><span class="meta">startLine=5 endLineInc=5 lines=3 → extractedEnd=7</span></div>
+<div class="cols-3">
+<div class="pane">
+<h3>Buffer</h3><pre><span class="line"><span class="ln">1</span>var arra = [1, 2, 3];</span><span class="line"><span class="ln">2</span></span><span class="line"><span class="ln">3</span>function test() {</span><span class="line"><span class="ln">4</span>  for (var i = 0; i &lt; arra.length; i++) {<span class="cursor"> </span></span><span class="line mod"><span class="ln">5</span>}</span><span class="line wrong-line"><span class="ln">6</span></span><span class="line wrong-line"><span class="ln">7</span>function test2() {</span><span class="line"><span class="ln">8</span>  console.log(arra);</span><span class="line"><span class="ln">9</span>}</span><span class="line"><span class="ln">10</span>  </span></pre></div>
+<div class="pane">
+<h3>Old (extracted)</h3><pre><span class="line"><span class="ln">5</span>}</span><span class="line wrong-line"><span class="ln">6</span></span><span class="line wrong-line"><span class="ln">7</span>function test2() {</span></pre>
+<h3>New (completion)</h3><pre><span class="line add"><span class="ln">1</span>    console.log(arra[i]);</span><span class="line add"><span class="ln">2</span>  }</span><span class="line add"><span class="ln">3</span>}</span></pre></div>
+<div class="pane">
+<h3>After Accept</h3><pre><span class="line"><span class="ln">1</span>var arra = [1, 2, 3];</span><span class="line"><span class="ln">2</span></span><span class="line"><span class="ln">3</span>function test() {</span><span class="line"><span class="ln">4</span>  for (var i = 0; i &lt; arra.length; i++) {</span><span class="line wrong-line"><span class="ln">5</span>}</span><span class="line wrong-line"><span class="ln">6</span>    console.log(arra[i]);</span><span class="line wrong-line"><span class="ln">7</span>  }</span><span class="line wrong-line"><span class="ln">8</span>  console.log(arra);</span><span class="line wrong-line"><span class="ln">9</span>}</span><span class="line wrong-line"><span class="ln">10</span>  </span><span class="line wrong-line"><span class="ln">11</span>(missing)</span><span class="line wrong-line"><span class="ln">12</span>(missing)</span></pre></div>
+</div>
+<div class="step-label">Groups: <span class="group-tag addition">addition @5</span> <span class="group-tag deletion">deletion @6</span> </div>
+<div class="step-label"><span class="fail">Failures:</span> <span class="meta">unexpected deletion at buffer_line 6</span> <span class="meta">bufferAfterAccept: 10 lines, want 12</span> </div>
+<div class="json-section"><details class="json-details" open><summary>JSON</summary>
+<code class="shiki-json">{
+  &#34;completion&#34;: {
+    &#34;startLine&#34;: 5,
+    &#34;endLineInc&#34;: 5,
+    &#34;lines&#34;: [
+      &#34;    console.log(arra[i]);&#34;,
+      &#34;  }&#34;,
+      &#34;}&#34;
+    ]
+  },
+  &#34;oldLines&#34;: [
+    &#34;}&#34;,
+    &#34;&#34;,
+    &#34;function test2() {&#34;
+  ],
+  &#34;stages&#34;: [
+    {
+      &#34;StartLine&#34;: 6,
+      &#34;Groups&#34;: [
+        {
+          &#34;Type&#34;: &#34;addition&#34;,
+          &#34;StartLine&#34;: 1,
+          &#34;EndLine&#34;: 2,
+          &#34;BufferLine&#34;: 5,
+          &#34;RenderHint&#34;: &#34;&#34;,
+          &#34;ColStart&#34;: 0,
+          &#34;ColEnd&#34;: 0,
+          &#34;Lines&#34;: [
+            &#34;    console.log(arra[i]);&#34;,
+            &#34;  }&#34;
+          ]
+        },
+        {
+          &#34;Type&#34;: &#34;deletion&#34;,
+          &#34;StartLine&#34;: 4,
+          &#34;EndLine&#34;: 5,
+          &#34;BufferLine&#34;: 6,
+          &#34;RenderHint&#34;: &#34;&#34;,
+          &#34;ColStart&#34;: 0,
+          &#34;ColEnd&#34;: 0,
+          &#34;Lines&#34;: [
+            &#34;&#34;,
+            &#34;function test2() {&#34;
+          ]
+        }
+      ],
+      &#34;CursorLine&#34;: 2,
+      &#34;CursorCol&#34;: 3
+    }
+  ]
+}</code>
+</details></div>
+</details>
+<script>
+function applyFilter(filter) {
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'))
+  const btn = document.querySelector('.filter-btn[data-filter="' + filter + '"]')
+  if (btn) btn.classList.add('active')
+  document.querySelectorAll('.fixture').forEach(el => {
+    if (filter === 'all') { el.style.display = ''; return }
+    el.style.display = el.dataset.status === filter ? '' : 'none'
+  })
+}
+const initialFilter = new URLSearchParams(location.search).get('filter') || 'all'
+applyFilter(initialFilter)
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const filter = btn.dataset.filter
+    const url = new URL(location)
+    if (filter === 'all') { url.searchParams.delete('filter') } else { url.searchParams.set('filter', filter) }
+    history.replaceState(null, '', url)
+    applyFilter(filter)
+  })
+})
+</script>
+<script type="module">
+import { codeToHtml } from 'https://esm.sh/shiki@3.0.0'
+document.querySelectorAll('.shiki-json').forEach(async (el) => {
+  const code = el.textContent
+  el.innerHTML = await codeToHtml(code, { lang: 'json', theme: 'github-dark-default' })
+})
+</script>
+</body></html>

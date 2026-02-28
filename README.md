@@ -319,6 +319,16 @@ llama-server -hf sweepai/sweep-next-edit-1.5b --port 8000
 
 # Or with a local GGUF file
 llama-server -m sweep-next-edit-1.5b.q8_0.v2.gguf --port 8000
+
+# With caching and speculative decoding
+llama-server \
+    -m sweep-next-edit-1.5b.q8_0.v2.gguf \
+    --port 8000 \
+    --cache-reuse 64 \
+    --spec-type ngram-mod \
+    --spec-ngram-size-n 24 \
+    --draft-min 12 \
+    --draft-max 64
 ```
 
 </details>

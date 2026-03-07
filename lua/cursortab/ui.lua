@@ -909,7 +909,11 @@ end
 function ui.show_completion(diff_result)
 	has_completion = true
 	ui.ensure_close_all()
-	show_completion(diff_result)
+	local ok = pcall(show_completion, diff_result)
+	if not ok then
+		ui.ensure_close_all()
+		has_completion = false
+	end
 end
 
 -- Show cursor prediction jump text
@@ -917,7 +921,11 @@ end
 function ui.show_cursor_prediction(line_num)
 	has_cursor_prediction = true
 	ui.ensure_close_all()
-	show_cursor_prediction(line_num)
+	local ok = pcall(show_cursor_prediction, line_num)
+	if not ok then
+		ui.ensure_close_all()
+		has_cursor_prediction = false
+	end
 end
 
 -- Close all UI elements and reset state (for on_reject)

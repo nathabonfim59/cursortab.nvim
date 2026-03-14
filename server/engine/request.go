@@ -114,9 +114,14 @@ func (e *Engine) getViewportHeightConstraint() int {
 	return 0
 }
 
+// prefetchOpts configures a prefetch request. Zero value uses buffer defaults.
+type prefetchOpts struct {
+	Lines []string // Override buffer lines (nil = use current buffer)
+}
+
 // requestPrefetch requests a completion for a specific cursor position without changing the engine state.
 // Used to speculatively request completions ahead of user actions.
-func (e *Engine) requestPrefetch(source types.CompletionSource, overrideRow int, overrideCol int) {
+func (e *Engine) requestPrefetch(source types.CompletionSource, overrideRow, overrideCol int, opts prefetchOpts) {
 	if e.stopped {
 		return
 	}
@@ -136,7 +141,10 @@ func (e *Engine) requestPrefetch(source types.CompletionSource, overrideRow int,
 	e.prefetchState = prefetchInFlight
 
 	// Snapshot required values to avoid races with buffer mutation
-	lines := append([]string{}, e.buffer.Lines()...)
+	lines := opts.Lines
+	if lines == nil {
+		lines = append([]string{}, e.buffer.Lines()...)
+	}
 	previousLines := append([]string{}, e.buffer.PreviousLines()...)
 	version := e.buffer.Version()
 	filePath := e.buffer.Path()
@@ -310,25 +318,36 @@ func (e *Engine) handleDeferredCursorTarget() {
 	e.cursorTarget = nil
 }
 
-// prefetchAtNMinusOne triggers prefetch when at the second-to-last stage.
-// This allows the next completion to be ready when user accepts the last stage.
+// prefetchAtNMinusOne triggers prefetch when showing the last stage.
+// Applies the last stage's edit to the buffer snapshot so the model sees the
+// post-accept state, and centers the request on the cursor target position.
 func (e *Engine) prefetchAtNMinusOne() {
 	if e.stagedCompletion == nil {
 		return
 	}
 
-	// Check if we're at n-1 (one stage remaining after current)
 	if e.stagedCompletion.CurrentIdx != len(e.stagedCompletion.Stages)-1 {
 		return
 	}
 
-	lastStage := e.getStage(len(e.stagedCompletion.Stages) - 1)
-	if lastStage == nil || lastStage.CursorTarget == nil || !lastStage.CursorTarget.ShouldRetrigger {
+	stage := e.getStage(len(e.stagedCompletion.Stages) - 1)
+	if stage == nil || stage.CursorTarget == nil || !stage.CursorTarget.ShouldRetrigger {
 		return
 	}
 
-	overrideRow := max(1, lastStage.BufferStart)
-	e.requestPrefetch(types.CompletionSourceTyping, overrideRow, 0)
+	// Build a synthetic buffer with the last stage's edit applied.
+	// This is what the buffer will look like after the user accepts.
+	lines := append([]string{}, e.buffer.Lines()...)
+	start := stage.BufferStart - 1 // 0-indexed
+	end := stage.BufferEnd         // exclusive (BufferEnd is 1-indexed inclusive)
+	if start >= 0 && end <= len(lines) {
+		lines = append(lines[:start], append(stage.Lines, lines[end:]...)...)
+	}
+
+	// The cursor target accounts for line count changes from the stage.
+	overrideRow := max(1, int(stage.CursorTarget.LineNumber))
+
+	e.requestPrefetch(types.CompletionSourceTyping, overrideRow, 0, prefetchOpts{Lines: lines})
 	e.prefetchState = prefetchWaitingForCursorPrediction
 }
 
@@ -345,6 +364,6 @@ func (e *Engine) prefetchAtCursorTarget() {
 	}
 
 	overrideRow := max(1, int(e.cursorTarget.LineNumber))
-	e.requestPrefetch(types.CompletionSourceTyping, overrideRow, 0)
+	e.requestPrefetch(types.CompletionSourceTyping, overrideRow, 0, prefetchOpts{})
 	e.prefetchState = prefetchWaitingForCursorPrediction
 }

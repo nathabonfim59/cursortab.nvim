@@ -73,6 +73,47 @@ use {
 }
 ```
 
+## Quick Start
+
+The fastest way to get started is with the **Mercury API** provider (hosted, no
+local GPU needed):
+
+1. Get an API key from [Inception Labs](https://docs.inceptionlabs.ai/)
+2. Set the environment variable:
+
+   ```bash
+   export MERCURY_AI_TOKEN="your-api-key-here"
+   ```
+
+3. Add the provider to your setup:
+
+   ```lua
+   require("cursortab").setup({
+     provider = {
+       type = "mercuryapi",
+       api_key_env = "MERCURY_AI_TOKEN",
+     },
+   })
+   ```
+
+If you prefer **local inference**, use the `sweep` provider with
+[llama.cpp](https://github.com/ggml-org/llama.cpp):
+
+```bash
+llama-server -hf sweepai/sweep-next-edit-1.5b --port 8000
+```
+
+```lua
+require("cursortab").setup({
+  provider = {
+    type = "sweep",
+    url = "http://localhost:8000",
+  },
+})
+```
+
+See [Providers](#providers) for all available options.
+
 ## Configuration
 
 ```lua
@@ -568,19 +609,6 @@ with `-update` to generate the initial `expected.json`, then review and
 `-verify-case=<name>` to mark it verified.
 
 ## FAQ
-
-<details>
-<summary>Which provider should I use?</summary>
-
-See the [provider feature comparison table](#providers) for capabilities. For
-the best experience:
-
-- If you have a consumer GPU and want to run locally, use the `sweep` provider
-  with the `sweep-next-edit-1.5b` model for fast local inference
-- Otherwise, use the `sweepapi` for the best quality with the hosted
-  `sweep-next-edit-7b` model
-
-</details>
 
 <details>
 <summary>Why are completions slow?</summary>

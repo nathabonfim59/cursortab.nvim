@@ -17,6 +17,7 @@ A Neovim plugin that provides local edit completions and cursor predictions.
 * [Installation](#installation)
   * [Using lazy.nvim](#using-lazynvim)
   * [Using packer.nvim](#using-packernvim)
+* [Quick Start](#quick-start)
 * [Configuration](#configuration)
   * [Highlight Groups](#highlight-groups)
   * [Providers](#providers)
@@ -238,20 +239,20 @@ Zeta, Copilot, and Mercury API.
 | `sweepapi`   |   ✓    |     ✓      |     ✓      |         ✓         |     ✓     | `sweep-next-edit-7b`   |
 | `zeta`       |        |     ✓      |     ✓      |         ✓         |     ✓     | `zeta`                 |
 | `copilot`    |   ✓    |     ✓      |     ✓      |         ✓         |           | GitHub Copilot         |
-| `mercuryapi` |   ✓    |     ✓      |     ✓      |         ✓         |           | `mercury-coder`        |
+| `mercuryapi` |   ✓    |     ✓      |     ✓      |         ✓         |           | `mercury-edit`         |
 
 **Context Per Provider:**
 
-| Context             | inline | fim | sweep | zeta | sweepapi | copilot | mercuryapi |
-| ------------------- | :----: | :-: | :---: | :--: | :------: | :-----: | :--------: |
-| Buffer content      |   ✓    |  ✓  |   ✓   |  ✓   |    ✓     |         |     ✓      |
-| Edit history        |        |     |   ✓   |  ✓   |    ✓     |         |     ✓      |
-| Previous file state |        |     |   ✓   |      |    ✓     |         |            |
-| LSP diagnostics     |        |     |       |  ✓   |    ✓     |         |            |
-| Treesitter context  |        |     |   ✓   |  ✓   |    ✓     |         |            |
-| Git diff context    |        |     |   ✓   |  ✓   |    ✓     |         |            |
-| Recent files        |        |     |       |      |    ✓     |         |     ✓      |
-| User actions        |        |     |       |      |    ✓     |         |            |
+| Context              | inline | fim | sweep | zeta | sweepapi | copilot | mercuryapi |
+| -------------------- | :----: | :-: | :---: | :--: | :------: | :-----: | :--------: |
+| Buffer content       |   ✓    |  ✓  |   ✓   |  ✓   |    ✓     |         |     ✓      |
+| Edit history         |        |     |   ✓   |  ✓   |    ✓     |         |     ✓      |
+| Previous file state  |        |     |   ✓   |      |    ✓     |         |            |
+| LSP diagnostics      |        |     |       |  ✓   |    ✓     |         |     ✓      |
+| Treesitter context   |        |     |   ✓   |  ✓   |    ✓     |         |     ✓      |
+| Git diff context     |        |     |   ✓   |  ✓   |    ✓     |         |     ✓      |
+| Recent files         |        |     |       |      |    ✓     |         |     ✓      |
+| User actions         |        |     |       |      |    ✓     |         |            |
 
 #### Inline Provider (Default)
 

@@ -10,7 +10,6 @@
 //	>>>>>>> UPDATED
 //
 //	<|file_sep|>context/treesitter    (omitted if no treesitter context)
-//	Language: go
 //	Enclosing scope: func handleRequest(...) {
 //	Sibling: func otherFunc() {
 //	Import: import "net/http"

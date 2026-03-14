@@ -104,6 +104,9 @@ func TestBuildPrompt(t *testing.T) {
 		4, 4, // cursor at line 4, col 4
 		nil,
 		nil,
+		nil,
+		nil,
+		nil,
 	)
 
 	// Check required sections exist
@@ -132,11 +135,67 @@ func TestBuildPromptWithSnapshots(t *testing.T) {
 		},
 	}
 
-	prompt := buildPrompt("main.go", lines, 1, 1, 1, 1, 1, 0, nil, snapshots)
+	prompt := buildPrompt("main.go", lines, 1, 1, 1, 1, 1, 0, nil, snapshots, nil, nil, nil)
 
 	assert.Contains(t, prompt, RecentlyViewedSnippetStart, "snippet start")
 	assert.Contains(t, prompt, "code_snippet_file_path: helper.go", "snippet path")
 	assert.Contains(t, prompt, "func helper() {}", "snippet content")
+}
+
+func TestBuildPromptWithDiagnostics(t *testing.T) {
+	lines := []string{"code"}
+	diag := &types.LinterErrors{
+		RelativeWorkspacePath: "main.go",
+		Errors: []*types.LinterError{
+			{
+				Message:  "undefined: processItems",
+				Source:   "gopls",
+				Severity: "error",
+				Range:    &types.CursorRange{StartLine: 12},
+			},
+			{
+				Message:  "unused variable 'x'",
+				Source:   "gopls",
+				Severity: "warning",
+			},
+		},
+	}
+
+	prompt := buildPrompt("main.go", lines, 1, 1, 1, 1, 1, 0, nil, nil, diag, nil, nil)
+
+	assert.Contains(t, prompt, "code_snippet_file_path: diagnostics", "diagnostics snippet path")
+	assert.Contains(t, prompt, "line 12: [error] undefined: processItems (source: gopls)", "error with line")
+	assert.Contains(t, prompt, "[warning] unused variable 'x' (source: gopls)", "warning without line")
+}
+
+func TestBuildPromptWithTreesitter(t *testing.T) {
+	lines := []string{"code"}
+	ts := &types.TreesitterContext{
+		EnclosingSignature: "func process(items []string) []string {",
+		Siblings: []*types.TreesitterSymbol{
+			{Name: "main", Signature: "func main() {", Line: 15},
+		},
+		Imports: []string{"import \"fmt\""},
+	}
+
+	prompt := buildPrompt("main.go", lines, 1, 1, 1, 1, 1, 0, nil, nil, nil, ts, nil)
+
+	assert.Contains(t, prompt, "code_snippet_file_path: treesitter_context", "treesitter snippet path")
+	assert.Contains(t, prompt, "Enclosing scope: func process(items []string) []string {", "enclosing scope")
+	assert.Contains(t, prompt, "Sibling: line 15: func main() {", "sibling")
+	assert.Contains(t, prompt, "Import: import \"fmt\"", "import")
+}
+
+func TestBuildPromptWithGitDiff(t *testing.T) {
+	lines := []string{"code"}
+	gd := &types.GitDiffContext{
+		Diff: "+func newHelper() {}\n-func oldHelper() {}\n",
+	}
+
+	prompt := buildPrompt("main.go", lines, 1, 1, 1, 1, 1, 0, nil, nil, nil, nil, gd)
+
+	assert.Contains(t, prompt, "code_snippet_file_path: staged_git_diff", "git diff snippet path")
+	assert.Contains(t, prompt, "+func newHelper() {}", "diff content")
 }
 
 func TestBuildPromptWithDiffHistory(t *testing.T) {
@@ -150,7 +209,7 @@ func TestBuildPromptWithDiffHistory(t *testing.T) {
 		},
 	}
 
-	prompt := buildPrompt("main.go", lines, 1, 1, 1, 1, 1, 0, histories, nil)
+	prompt := buildPrompt("main.go", lines, 1, 1, 1, 1, 1, 0, histories, nil, nil, nil, nil)
 
 	assert.Contains(t, prompt, "--- main.go", "diff header old")
 	assert.Contains(t, prompt, "+++ main.go", "diff header new")
@@ -417,7 +476,7 @@ func TestCursorTagPlacement(t *testing.T) {
 	lines := []string{"hello world"}
 
 	// Cursor at position 5 (after "hello")
-	prompt := buildPrompt("test.go", lines, 1, 1, 1, 1, 1, 5, nil, nil)
+	prompt := buildPrompt("test.go", lines, 1, 1, 1, 1, 1, 5, nil, nil, nil, nil, nil)
 
 	// Should have cursor after "hello"
 	assert.Contains(t, prompt, "hello"+CursorTag+" world", "cursor at col 5")
@@ -427,7 +486,7 @@ func TestCursorTagAtLineEnd(t *testing.T) {
 	lines := []string{"hello"}
 
 	// Cursor at end of line
-	prompt := buildPrompt("test.go", lines, 1, 1, 1, 1, 1, 100, nil, nil)
+	prompt := buildPrompt("test.go", lines, 1, 1, 1, 1, 1, 100, nil, nil, nil, nil, nil)
 
 	// Should clamp to end of line
 	assert.Contains(t, prompt, "hello"+CursorTag+"\n", "cursor at end")

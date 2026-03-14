@@ -21,7 +21,6 @@
 //	```
 //
 //	### Code Context:                      (omitted if no treesitter context)
-//	Language: go
 //	Enclosing scope: func handleRequest(w http.ResponseWriter, r *http.Request) {
 //	Sibling symbols:
 //	  line 5: func otherFunc() {

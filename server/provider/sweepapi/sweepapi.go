@@ -12,7 +12,7 @@
 //	  "recent_user_actions": [...user edit actions...],
 //	  "retrieval_chunks": [
 //	    {"file_path": "diagnostics",         "content": "Line 10: [gopls] undefined: foo\n", ...},
-//	    {"file_path": "treesitter_context",  "content": "Language: go\nEnclosing scope: ...\n", ...},
+//	    {"file_path": "treesitter_context",  "content": "Enclosing scope: ...\nSibling: ...\n", ...},
 //	    {"file_path": "staged_git_diff",     "content": "<full diff or +/-symbol lines>", ...}
 //	  ]
 //	}

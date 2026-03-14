@@ -1,3 +1,53 @@
+// Package mercuryapi implements the Mercury API provider (Inception Labs hosted).
+//
+// Prompt format (sent as a single user message to /v1/edit/completions):
+//
+//	<|recently_viewed_code_snippets|>
+//	<|recently_viewed_code_snippet|>
+//	code_snippet_file_path: helper.go
+//	func helper() string { ... }
+//	<|/recently_viewed_code_snippet|>
+//
+//	<|recently_viewed_code_snippet|>           (omitted if no diagnostics)
+//	code_snippet_file_path: diagnostics
+//	line 12: [error] undefined: foo (source: gopls)
+//	<|/recently_viewed_code_snippet|>
+//
+//	<|recently_viewed_code_snippet|>           (omitted if no treesitter context)
+//	code_snippet_file_path: treesitter_context
+//	Enclosing scope: func process(items []string) []string {
+//	Sibling: line 15: func main() {
+//	Import: import "fmt"
+//	<|/recently_viewed_code_snippet|>
+//
+//	<|recently_viewed_code_snippet|>           (omitted if no staged changes)
+//	code_snippet_file_path: staged_git_diff
+//	+func newHelper() {}
+//	-func oldHelper() {}
+//	<|/recently_viewed_code_snippet|>
+//	<|/recently_viewed_code_snippets|>
+//
+//	<|current_file_content|>
+//	current_file_path: main.go
+//	...context lines above editable region...
+//	<|code_to_edit|>
+//	...before cursor...<|cursor|>...after cursor...
+//	...more editable lines...
+//	<|/code_to_edit|>
+//	...context lines below editable region...
+//	<|/current_file_content|>
+//
+//	<|edit_diff_history|>
+//	--- main.go
+//	+++ main.go
+//	@@ -6,1 +6,1 @@
+//	-old line
+//	+new line
+//	<|/edit_diff_history|>
+//
+// The editable region is expanded to syntax boundaries (AST nodes) when
+// treesitter data is available. Context defaults to the entire file, trimmed
+// only for files exceeding 150KB.
 package mercuryapi
 
 import (
@@ -108,6 +158,9 @@ func (p *Provider) GetCompletion(ctx context.Context, req *types.CompletionReque
 		req.CursorRow, req.CursorCol,
 		req.FileDiffHistories,
 		req.RecentBufferSnapshots,
+		req.GetDiagnostics(),
+		req.GetTreesitter(),
+		req.GetGitDiff(),
 	)
 
 	// Build API request
@@ -332,6 +385,9 @@ func buildPrompt(
 	cursorRow, cursorCol int, // 1-indexed row, 0-indexed col
 	diffHistories []*types.FileDiffHistory,
 	recentSnapshots []*types.RecentBufferSnapshot,
+	diagnostics *types.LinterErrors,
+	treesitter *types.TreesitterContext,
+	gitDiff *types.GitDiffContext,
 ) string {
 	var sb strings.Builder
 
@@ -344,6 +400,51 @@ func buildPrompt(
 		sb.WriteString("\n")
 		sb.WriteString(strings.Join(snap.Lines, "\n"))
 		if len(snap.Lines) > 0 && !strings.HasSuffix(snap.Lines[len(snap.Lines)-1], "\n") {
+			sb.WriteString("\n")
+		}
+		sb.WriteString(RecentlyViewedSnippetEnd)
+	}
+	if diagnostics != nil && len(diagnostics.Errors) > 0 {
+		sb.WriteString(RecentlyViewedSnippetStart)
+		sb.WriteString(CodeSnippetFilePathPrefix)
+		sb.WriteString("diagnostics\n")
+		for _, err := range diagnostics.Errors {
+			if err.Range != nil {
+				fmt.Fprintf(&sb, "line %d: ", err.Range.StartLine)
+			}
+			fmt.Fprintf(&sb, "[%s] %s", err.Severity, err.Message)
+			if err.Source != "" {
+				fmt.Fprintf(&sb, " (source: %s)", err.Source)
+			}
+			sb.WriteString("\n")
+		}
+		sb.WriteString(RecentlyViewedSnippetEnd)
+	}
+	if treesitter != nil {
+		var tsContent strings.Builder
+		if treesitter.EnclosingSignature != "" {
+			fmt.Fprintf(&tsContent, "Enclosing scope: %s\n", treesitter.EnclosingSignature)
+		}
+		for _, s := range treesitter.Siblings {
+			fmt.Fprintf(&tsContent, "Sibling: line %d: %s\n", s.Line, s.Signature)
+		}
+		for _, imp := range treesitter.Imports {
+			fmt.Fprintf(&tsContent, "Import: %s\n", imp)
+		}
+		if tsContent.Len() > 0 {
+			sb.WriteString(RecentlyViewedSnippetStart)
+			sb.WriteString(CodeSnippetFilePathPrefix)
+			sb.WriteString("treesitter_context\n")
+			sb.WriteString(tsContent.String())
+			sb.WriteString(RecentlyViewedSnippetEnd)
+		}
+	}
+	if gitDiff != nil && gitDiff.Diff != "" {
+		sb.WriteString(RecentlyViewedSnippetStart)
+		sb.WriteString(CodeSnippetFilePathPrefix)
+		sb.WriteString("staged_git_diff\n")
+		sb.WriteString(gitDiff.Diff)
+		if !strings.HasSuffix(gitDiff.Diff, "\n") {
 			sb.WriteString("\n")
 		}
 		sb.WriteString(RecentlyViewedSnippetEnd)

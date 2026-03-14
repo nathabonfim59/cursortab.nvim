@@ -98,6 +98,10 @@ func NewDaemon(config Config) (*Daemon, error) {
 		return nil, fmt.Errorf("unsupported provider type: %s", config.Provider.Type)
 	}
 
+	provType := types.ProviderType(config.Provider.Type)
+	insertionOnly := provType == types.ProviderTypeInline ||
+		provType == types.ProviderTypeFIM
+
 	eng, err := engine.NewEngine(prov, buf, engine.EngineConfig{
 		NsID:                config.NsID,
 		CompletionTimeout:   time.Duration(config.Provider.CompletionTimeout) * time.Millisecond,
@@ -112,6 +116,7 @@ func NewDaemon(config Config) (*Daemon, error) {
 		MaxVisibleLines:  config.Behavior.MaxVisibleLines,
 		CompleteInInsert: config.Behavior.CompleteInInsert,
 		CompleteInNormal: config.Behavior.CompleteInNormal,
+		InsertionOnly:    insertionOnly,
 	}, engine.SystemClock, ctx.NewGatherer(buf))
 	if err != nil {
 		return nil, err

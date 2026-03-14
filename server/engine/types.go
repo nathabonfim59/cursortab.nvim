@@ -271,4 +271,5 @@ type EngineConfig struct {
 	MaxVisibleLines     int  // Maximum lines per stage (0 = no limit)
 	CompleteInInsert    bool // Show completions in insert mode
 	CompleteInNormal    bool // Show completions in normal mode
+	InsertionOnly       bool // True for FIM/inline providers that only extend forward
 }

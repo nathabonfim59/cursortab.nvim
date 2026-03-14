@@ -35,6 +35,11 @@ func (e *Engine) requestCompletion(source types.CompletionSource) {
 
 	e.syncBuffer()
 
+	// Pre-request suppression (skip for manual triggers and idle completions)
+	if source == types.CompletionSourceTyping && !e.manuallyTriggered && e.shouldSuppressCompletion() {
+		return
+	}
+
 	req := &types.CompletionRequest{
 		Source:                source,
 		WorkspacePath:         e.WorkspacePath,

@@ -1232,6 +1232,7 @@ func TestIndentedLineFilledWithContent(t *testing.T) {
 		{"spaces only", "    ", "    return result"},
 		{"tabs only", "\t\t", "\t\tresult := compute()"},
 		{"partial keyword", "    re", "    return result"},
+		{"tabs with partial content", "\t\tlogger.Debug(\"", "\t\tlogger.Debug(\"contextual filter shown\")"},
 	}
 
 	for _, tt := range tests {

@@ -471,10 +471,12 @@ local function render_append_chars(
 
 	if appended_text and appended_text ~= "" then
 		if config.get().ui.completions.addition_style == "dimmed" then
+			-- col_start is a byte offset; convert to display column for overlay positioning
+			local display_col = vim.fn.strdisplaywidth(string.sub(content, 1, col_start))
 			local overlay_win, overlay_buf, _ = create_overlay_window(
 				current_win,
 				nvim_line + virt_line_offset,
-				col_start,
+				display_col,
 				{ appended_text },
 				syntax_ft,
 				"CursorTabAddition",

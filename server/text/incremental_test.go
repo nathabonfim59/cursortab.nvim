@@ -2388,3 +2388,81 @@ func TestIncrementalStageBuilder_DuplicateLinesAcrossFunctions(t *testing.T) {
 		})
 	}
 }
+
+// TestIncrementalStageBuilder_PartialLineModificationDuringStreaming tests that when
+// the cursor is on a partially-typed line (e.g., "def insers") and the model streams
+// a completed version ("def insertion_sort(arr):"), the first streamed stage correctly
+// detects a modification rather than a pure addition.
+//
+// The fix: maxVisibleLines defers stage building until the next matched line,
+// so oldLineIdx has advanced past the partially-typed line and the batch diff
+// can detect the modification via fuzzy matching.
+func TestIncrementalStageBuilder_PartialLineModificationDuringStreaming(t *testing.T) {
+	oldLines := []string{
+		"import numpy as np",
+		"",
+		"",
+		"def bubble_sort(arr):",
+		"    for i in range(len(arr)):",
+		"        for j in range(i + 1, len(arr)):",
+		"            if arr[i] > arr[j]:",
+		"                arr[i], arr[j] = arr[j], arr[i]",
+		"    return arr",
+		"",
+		"def insers",
+		"",
+		"",
+		"if __name__ == \"__main__\":",
+	}
+
+	builder := NewIncrementalStageBuilder(
+		oldLines,
+		1,    // baseLineOffset
+		10,   // proximityThreshold
+		4,    // maxVisibleLines — defers after 4 changes, builds on next match
+		0, 0, // viewport disabled
+		11, 10, // cursorRow (line 11), cursorCol (end of "def insers")
+		"test.py",
+	)
+
+	// Stream lines: first 10 match, then the changes start
+	for _, line := range oldLines[:10] {
+		stage := builder.AddLine(line)
+		assert.Nil(t, stage, "unchanged lines should not produce a stage")
+	}
+
+	// 4 change lines — maxVisibleLines is reached but stage is deferred
+	stage := builder.AddLine("def insertion_sort(arr):")
+	assert.Nil(t, stage, "should not produce a stage on change (deferred)")
+	stage = builder.AddLine("    for i in range(1, len(arr)):")
+	assert.Nil(t, stage, "should not produce a stage on change (deferred)")
+	stage = builder.AddLine("        key = arr[i]")
+	assert.Nil(t, stage, "should not produce a stage on change (deferred)")
+	stage = builder.AddLine("        j = i - 1")
+	assert.Nil(t, stage, "should not produce a stage on change (deferred)")
+
+	// More body lines (still changes, still deferred)
+	builder.AddLine("        while j >= 0 and arr[j] > key:")
+	builder.AddLine("            arr[j + 1] = arr[j]")
+	builder.AddLine("            j -= 1")
+	builder.AddLine("        arr[j + 1] = key")
+	builder.AddLine("    return arr")
+
+	// Empty lines match old[11] and old[12] — the deferred build fires on
+	// the first match because oldLineIdx has now advanced past "def insers".
+	stage = builder.AddLine("")
+	assert.NotNil(t, stage, "should produce a stage on first match after deferral")
+
+	// The first group on buffer line 11 must be a modification (replacing
+	// "def insers" → "def insertion_sort(arr):"), not an addition.
+	hasModification := false
+	for _, g := range stage.Groups {
+		if g.BufferLine == 11 && g.Type == "modification" {
+			hasModification = true
+			assert.Equal(t, 1, len(g.OldLines), "modification should have 1 old line")
+			assert.Equal(t, "def insers", g.OldLines[0], "old line content")
+		}
+	}
+	assert.True(t, hasModification,
+		"first streamed stage should have a modification for the partially-typed line")
+}

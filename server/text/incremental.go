@@ -116,6 +116,7 @@ type IncrementalStageBuilder struct {
 	changeCount          int  // Number of change lines seen so far
 	lastChangeBufferLine int  // Buffer line of the last change (for gap detection)
 	firstStageSent       bool // After first stage, only accumulate
+	deferredBuild        bool // MaxVisibleLines hit; waiting for next match to build
 }
 
 // NewIncrementalStageBuilder creates a new incremental stage builder
@@ -158,15 +159,26 @@ func (b *IncrementalStageBuilder) AddLine(line string) *Stage {
 		bufferLine := b.diffBuilder.LineMapping.GetBufferLine(*change, b.BaseLineOffset)
 		b.lastChangeBufferLine = bufferLine
 
-		// MaxVisibleLines limit: produce first stage after enough changes
+		// MaxVisibleLines limit: defer stage building until the next matched
+		// line so oldLineIdx advances past the change region. Building now
+		// would exclude unmatched old lines (e.g., a partially-typed cursor
+		// line) from the diff, causing modifications to appear as additions.
 		if b.MaxVisibleLines > 0 && b.changeCount >= b.MaxVisibleLines {
-			b.firstStageSent = true
-			return b.buildFirstStage()
+			b.deferredBuild = true
 		}
 		return nil
 	}
 
-	// Unchanged line — check for gap after changes
+	// Unchanged line (exact match found) — oldLineIdx has advanced.
+
+	// Deferred build: maxVisibleLines was reached during changes, but we
+	// waited for a match so oldLineIdx now includes the change region.
+	if b.deferredBuild {
+		b.firstStageSent = true
+		return b.buildFirstStage()
+	}
+
+	// Check for gap after changes
 	if b.hasChanges && b.lastChangeBufferLine > 0 {
 		currentBufferLine := b.computeCurrentBufferLine(lineNum)
 		if currentBufferLine > 0 {

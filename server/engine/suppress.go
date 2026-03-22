@@ -84,10 +84,10 @@ func isDeletion(action types.UserActionType) bool {
 	return action == types.ActionDeleteChar || action == types.ActionDeleteSelection
 }
 
-// contextualFilterState tracks state across filter invocations for momentum features.
 type contextualFilterState struct {
-	lastShown        bool      // Did the previous filter call result in "show"?
-	lastDecisionTime time.Time // When the last accept/reject/suppress happened
+	lastShown        bool
+	lastDecisionTime time.Time
+	lastScore        float64
 }
 
 // suppressForContextualFilter returns true if the contextual filter score is
@@ -105,6 +105,7 @@ func (e *Engine) suppressForContextualFilter() bool {
 
 	suppress := contextfilter.ShouldSuppress(score)
 
+	e.filterState.lastScore = score
 	e.filterState.lastShown = !suppress
 	e.filterState.lastDecisionTime = e.clock.Now()
 

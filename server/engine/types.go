@@ -266,6 +266,7 @@ type FileState struct {
 // EngineConfig holds engine configuration
 type EngineConfig struct {
 	NsID                   int
+	ProviderName           string
 	CompletionTimeout      time.Duration
 	IdleCompletionDelay    time.Duration
 	TextChangeDebounce     time.Duration

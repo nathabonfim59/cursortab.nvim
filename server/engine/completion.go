@@ -19,12 +19,14 @@ func (e *Engine) handleCompletionReadyImpl(response *types.CompletionResponse) {
 
 	completion := response.Completions[0]
 
+	// Store metrics info for showCurrentStage to use
+	e.pendingMetricsInfo = response.MetricsInfo
+
 	if e.processCompletion(completion) {
-		// Completion was shown - record metrics
-		e.recordMetricsShown(response.MetricsInfo)
 		return
 	}
 
+	e.pendingMetricsInfo = nil
 	e.handleCompletionNoChanges(completion)
 }
 
@@ -252,6 +254,9 @@ func (e *Engine) showCurrentStage() {
 	// don't corrupt the stage's original Groups, which advanceStagedCompletion
 	// needs for correct isPureInsertion/offset calculations.
 	e.currentGroups = text.CopyGroups(stage.Groups)
+
+	e.recordMetricsShown(e.pendingMetricsInfo) // nil for streaming
+	e.pendingMetricsInfo = nil
 }
 
 // getStage returns the stage at the given index, or nil if out of bounds

@@ -60,14 +60,15 @@ type DebugConfig struct {
 
 // Config is the main configuration structure
 type Config struct {
-	NsID          int            `json:"ns_id"`
-	LogLevel      string         `json:"log_level"`
-	StateDir      string         `json:"state_dir"`
-	EditorVersion string         `json:"editor_version"`
-	EditorOS      string         `json:"editor_os"`
-	Behavior      BehaviorConfig `json:"behavior"`
-	Provider      ProviderConfig `json:"provider"`
-	Debug         DebugConfig    `json:"debug"`
+	NsID           int            `json:"ns_id"`
+	LogLevel       string         `json:"log_level"`
+	StateDir       string         `json:"state_dir"`
+	EditorVersion  string         `json:"editor_version"`
+	EditorOS       string         `json:"editor_os"`
+	ContributeData bool           `json:"contribute_data"`
+	Behavior       BehaviorConfig `json:"behavior"`
+	Provider       ProviderConfig `json:"provider"`
+	Debug          DebugConfig    `json:"debug"`
 }
 
 // validateEnum checks that value is one of the valid options for the named field.

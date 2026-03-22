@@ -59,6 +59,8 @@ func (e *Engine) requestCompletion(source types.CompletionSource) {
 		return
 	}
 
+	e.lastCompletionSource = source
+
 	req := &types.CompletionRequest{
 		Source:                source,
 		WorkspacePath:         e.WorkspacePath,

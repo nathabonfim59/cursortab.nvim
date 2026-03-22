@@ -4,9 +4,10 @@ A Neovim plugin that provides local edit completions and cursor predictions.
 
 > [!NOTE]
 >
-> **We're exploring the idea of an open source dataset** to improve completions,
-> with real usage data from the community. If you're interested,
-> [join the discussion](https://github.com/cursortab/cursortab.nvim/discussions/59).
+> **Help improve completions** by contributing anonymous usage data to our
+> [open dataset](https://github.com/cursortab/api). Set `contribute_data = true`
+> in your config to opt in. No code content or file paths are collected —
+> [see the schema](https://github.com/cursortab/api/blob/main/docs/community-data-schema.md).
 
 > [!WARNING]
 >
@@ -128,6 +129,7 @@ require("cursortab").setup({
   enabled = true,
   log_level = "info",  -- "trace", "debug", "info", "warn", "error"
   state_dir = vim.fn.stdpath("state") .. "/cursortab",  -- Directory for runtime files (log, socket, pid)
+  contribute_data = false,  -- Opt-in: send anonymous metrics to train a better gating model
 
   keymaps = {
     accept = "<Tab>",           -- Keymap to accept completion, or false to disable

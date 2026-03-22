@@ -293,8 +293,8 @@ var languageIndex = map[string]int{
 	"c":               20,
 }
 
-// extToLanguage maps file extensions to Copilot language identifiers.
-var extToLanguage = map[string]string{
+// ExtToLanguage maps file extensions to language identifiers.
+var ExtToLanguage = map[string]string{
 	".js":   "javascript",
 	".mjs":  "javascript",
 	".cjs":  "javascript",
@@ -355,7 +355,7 @@ func Score(in Input) float64 {
 	}
 
 	// Feature 1: After-cursor whitespace
-	if afterCursorIsWhitespace(in.Lines, in.Row, in.Col) {
+	if AfterCursorIsWhitespace(in.Lines, in.Row, in.Col) {
 		s += weights[1]
 	}
 
@@ -366,21 +366,21 @@ func Score(in Input) float64 {
 	}
 
 	// Features 3-4: Prefix length and trimmed prefix length
-	line, col := currentLine(in.Lines, in.Row, in.Col)
+	line, col := CurrentLine(in.Lines, in.Row, in.Col)
 	prefix := line[:col]
 	s += weights[3] * math.Log(1+float64(len(prefix)))
 	trimmedLen := len(strings.TrimRight(prefix, " \t"))
 	s += weights[4] * math.Log(1+float64(trimmedLen))
 
 	// Features 5-7: Document length, cursor offset, relative position
-	docLen := documentByteLength(in.Lines)
-	cursorOffset := byteOffset(in.Lines, in.Row, in.Col)
+	docLen := DocumentByteLength(in.Lines)
+	cursorOffset := ByteOffset(in.Lines, in.Row, in.Col)
 	s += weights[5] * math.Log(1+float64(docLen))
 	s += weights[6] * math.Log(1+float64(cursorOffset))
 	s += weights[7] * (float64(cursorOffset) + 0.5) / (1.0 + float64(docLen))
 
 	// Feature 8: Language (one-hot)
-	lang := extToLanguage[in.FileExtension]
+	lang := ExtToLanguage[in.FileExtension]
 	if idx, ok := languageIndex[lang]; ok {
 		s += weights[8+idx]
 	} else {
@@ -395,7 +395,7 @@ func Score(in Input) float64 {
 	}
 
 	// Feature 10: Last non-whitespace character of prefix (one-hot)
-	if nwc, ok := lastNonWSChar(line, col); ok {
+	if nwc, ok := LastNonWSChar(line, col); ok {
 		s += weights[125+charIndex(nwc)]
 	} else {
 		s += weights[125] // no-char slot
@@ -409,7 +409,8 @@ func ShouldSuppress(score float64) bool {
 	return score < Threshold
 }
 
-func afterCursorIsWhitespace(lines []string, row, col int) bool {
+// AfterCursorIsWhitespace returns true if all text after the cursor is whitespace.
+func AfterCursorIsWhitespace(lines []string, row, col int) bool {
 	if row < 1 || row > len(lines) {
 		return true
 	}
@@ -420,7 +421,8 @@ func afterCursorIsWhitespace(lines []string, row, col int) bool {
 	return strings.TrimSpace(line[col:]) == ""
 }
 
-func currentLine(lines []string, row, col int) (string, int) {
+// CurrentLine returns the line at the given 1-based row with col clamped.
+func CurrentLine(lines []string, row, col int) (string, int) {
 	if row < 1 || row > len(lines) {
 		return "", 0
 	}
@@ -431,7 +433,8 @@ func currentLine(lines []string, row, col int) (string, int) {
 	return line, col
 }
 
-func documentByteLength(lines []string) int {
+// DocumentByteLength returns total bytes including newlines.
+func DocumentByteLength(lines []string) int {
 	total := 0
 	for _, line := range lines {
 		total += len(line) + 1
@@ -439,7 +442,8 @@ func documentByteLength(lines []string) int {
 	return total
 }
 
-func byteOffset(lines []string, row, col int) int {
+// ByteOffset returns the byte offset of cursor position in the document.
+func ByteOffset(lines []string, row, col int) int {
 	offset := 0
 	for i := 0; i < row-1 && i < len(lines); i++ {
 		offset += len(lines[i]) + 1
@@ -451,7 +455,8 @@ func byteOffset(lines []string, row, col int) int {
 	return offset
 }
 
-func lastNonWSChar(line string, col int) (byte, bool) {
+// LastNonWSChar returns the last non-whitespace character before col.
+func LastNonWSChar(line string, col int) (byte, bool) {
 	for i := col - 1; i >= 0; i-- {
 		if line[i] != ' ' && line[i] != '\t' {
 			return line[i], true

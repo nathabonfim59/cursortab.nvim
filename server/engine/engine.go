@@ -4,16 +4,27 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"cursortab/buffer"
+	"cursortab/contextfilter"
 	"cursortab/ctx"
 	"cursortab/logger"
 	"cursortab/metrics"
 	"cursortab/text"
 	"cursortab/types"
 )
+
+var actionAbbrev = map[types.UserActionType]string{
+	types.ActionInsertChar:      "IC",
+	types.ActionInsertSelection: "IS",
+	types.ActionDeleteChar:      "DC",
+	types.ActionDeleteSelection: "DS",
+	types.ActionCursorMovement:  "CM",
+}
 
 // Timer represents a timer that can be stopped.
 type Timer interface {
@@ -114,13 +125,20 @@ type Engine struct {
 	filterState contextualFilterState
 
 	// Metrics tracking (engine owns state, provider implements Sender)
-	metricSender   metrics.Sender
-	currentMetrics metrics.CompletionInfo
-	metricsCh      chan metrics.Event
+	metricSender    metrics.Sender
+	currentMetrics  metrics.CompletionInfo
+	currentSnapshot *metrics.Snapshot
+	contextResultCh chan *types.ContextResult // async context gather for snapshot
+	metricsCh       chan metrics.Event
+
+	lastCompletionSource   types.CompletionSource
+	completionsSinceAccept int
+	pendingMetricsInfo     *types.MetricsInfo // stored from batch completion for showCurrentStage
 }
 
 // NewEngine creates a new Engine instance.
-func NewEngine(provider Provider, buf Buffer, config EngineConfig, clock Clock, contextGatherer *ctx.Gatherer) (*Engine, error) {
+// communitySender is optional — pass nil to disable community metrics.
+func NewEngine(provider Provider, buf Buffer, config EngineConfig, clock Clock, contextGatherer *ctx.Gatherer, communitySender metrics.Sender) (*Engine, error) {
 	workspacePath, err := os.Getwd()
 	if err != nil {
 		logger.Warn("error getting current directory, using home: %v", err)
@@ -152,9 +170,17 @@ func NewEngine(provider Provider, buf Buffer, config EngineConfig, clock Clock, 
 		fileStateStore:         make(map[string]*FileState),
 	}
 
-	// Initialize metrics if provider implements Sender
-	if sender, ok := provider.(metrics.Sender); ok {
-		e.metricSender = sender
+	// Initialize metrics: combine provider sender + community sender if available
+	providerSender, _ := provider.(metrics.Sender)
+	switch {
+	case providerSender != nil && communitySender != nil:
+		e.metricSender = metrics.NewMultiSender(providerSender, communitySender)
+	case providerSender != nil:
+		e.metricSender = providerSender
+	case communitySender != nil:
+		e.metricSender = communitySender
+	}
+	if e.metricSender != nil {
 		e.metricsCh = make(chan metrics.Event, 64)
 		go e.metricsWorker()
 	}
@@ -257,6 +283,8 @@ func (e *Engine) clearState(opts ClearOptions) {
 	e.completionOriginalLines = nil
 	e.currentGroups = nil
 	e.manuallyTriggered = false
+	e.pendingMetricsInfo = nil
+	e.contextResultCh = nil
 }
 
 // clearAll clears everything including prefetch and staged completions
@@ -491,40 +519,281 @@ func totalChars(lines []string) int {
 
 // Metrics tracking
 
-// recordMetricsShown records that a completion was shown to the user.
-// Called when displaying a completion with metrics info from the provider.
+// recordMetricsShown records that a completion was shown. Pass nil for info
+// when no provider metrics ID is available (e.g. streaming completions).
 func (e *Engine) recordMetricsShown(info *types.MetricsInfo) {
-	if info == nil || info.ID == "" {
-		e.currentMetrics = metrics.CompletionInfo{}
-		return
+	now := e.clock.Now()
+	e.currentMetrics = metrics.CompletionInfo{ShownAt: now}
+
+	if info != nil && info.ID != "" {
+		e.currentMetrics.ID = info.ID
+		e.currentMetrics.Additions = info.Additions
+		e.currentMetrics.Deletions = info.Deletions
+	} else if len(e.completions) > 0 {
+		// Estimate additions/deletions from completion line counts
+		comp := e.completions[0]
+		bufferLines := e.buffer.Lines()
+		origCount := 0
+		for i := comp.StartLine; i <= comp.EndLineInc && i-1 < len(bufferLines); i++ {
+			origCount++
+		}
+		newCount := len(comp.Lines)
+		if newCount > origCount {
+			e.currentMetrics.Additions = newCount - origCount
+		} else if origCount > newCount {
+			e.currentMetrics.Deletions = origCount - newCount
+		}
 	}
-	e.currentMetrics = metrics.CompletionInfo{
-		ID:        info.ID,
-		Additions: info.Additions,
-		Deletions: info.Deletions,
-		ShownAt:   e.clock.Now(),
-	}
+
+	e.currentSnapshot = e.captureSnapshot()
+	e.gatherContextForSnapshot()
 	e.sendMetric(metrics.EventShown)
 }
 
-// sendMetric queues a metric event for async sending.
-// Clears currentMetrics after sending accept/reject/ignored events.
+func (e *Engine) gatherContextForSnapshot() {
+	if e.contextGatherer == nil {
+		return
+	}
+	ch := make(chan *types.ContextResult, 1)
+	e.contextResultCh = ch
+	filePath := e.buffer.Path()
+	row := e.buffer.Row()
+	col := e.buffer.Col()
+	go func() {
+		ch <- e.contextGatherer.Gather(e.mainCtx, &ctx.SourceRequest{
+			FilePath:          filePath,
+			CursorRow:         row,
+			CursorCol:         col,
+			WorkspacePath:     e.WorkspacePath,
+			MaxDiffBytes:      e.contextLimits.MaxDiffBytes,
+			MaxChangedSymbols: e.contextLimits.MaxChangedSymbols,
+			MaxSiblings:       e.contextLimits.MaxSiblings,
+		})
+	}()
+}
+
 func (e *Engine) sendMetric(eventType metrics.EventType) {
-	if e.metricSender == nil || e.currentMetrics.ID == "" {
+	if e.metricSender == nil {
+		return
+	}
+	// Need either a provider ID or a snapshot to send anything useful
+	if e.currentMetrics.ID == "" && e.currentSnapshot == nil {
 		return
 	}
 
-	event := metrics.Event{Type: eventType, Info: e.currentMetrics}
+	// On outcome events, fill in async context if available
+	if eventType != metrics.EventShown && e.currentSnapshot != nil && e.contextResultCh != nil {
+		select {
+		case result := <-e.contextResultCh:
+			if result != nil {
+				if result.Diagnostics != nil {
+					e.currentSnapshot.HasDiagnostics = len(result.Diagnostics.Errors) > 0
+				}
+				if result.Treesitter != nil {
+					e.currentSnapshot.TreesitterScope = classifyScope(result.Treesitter.EnclosingSignature)
+				}
+			}
+		default:
+			// Context gather not ready yet — leave defaults
+		}
+	}
 
-	// Clear metrics after outcome events (not after shown)
+	event := metrics.Event{
+		Type:     eventType,
+		Info:     e.currentMetrics,
+		Snapshot: e.currentSnapshot,
+	}
+
 	if eventType != metrics.EventShown {
 		e.currentMetrics = metrics.CompletionInfo{}
+		e.currentSnapshot = nil
+		e.contextResultCh = nil
+		if eventType == metrics.EventAccepted {
+			e.completionsSinceAccept = 0
+		} else {
+			e.completionsSinceAccept++
+		}
 	}
 
 	select {
 	case e.metricsCh <- event:
 	default:
 		logger.Warn("metrics: event queue full, dropping %s event for %s", eventType, event.Info.ID)
+	}
+}
+
+// classifyScope maps a treesitter enclosing signature to a coarse scope bucket.
+func classifyScope(signature string) string {
+	if signature == "" {
+		return "top_level"
+	}
+	sig := strings.ToLower(signature)
+	switch {
+	case strings.Contains(sig, "func") || strings.Contains(sig, "function") ||
+		strings.Contains(sig, "method") || strings.Contains(sig, "def "):
+		return "function"
+	case strings.Contains(sig, "class") || strings.Contains(sig, "struct") ||
+		strings.Contains(sig, "impl") || strings.Contains(sig, "interface"):
+		return "class"
+	case strings.Contains(sig, "comment"):
+		return "comment"
+	case strings.Contains(sig, "string") || strings.Contains(sig, "template"):
+		return "string"
+	default:
+		return "other"
+	}
+}
+
+func (e *Engine) captureSnapshot() *metrics.Snapshot {
+	lines := e.buffer.Lines()
+	row := e.buffer.Row()
+
+	line, col := contextfilter.CurrentLine(lines, row, e.buffer.Col())
+	prefix := line[:col]
+	trimmedPrefix := strings.TrimRight(prefix, " \t")
+
+	docLen := contextfilter.DocumentByteLength(lines)
+	cursorOffset := contextfilter.ByteOffset(lines, row, col)
+	relativePosition := 0.0
+	if docLen > 0 {
+		relativePosition = (float64(cursorOffset) + 0.5) / (1.0 + float64(docLen))
+	}
+
+	lastChar := ""
+	if len(prefix) > 0 {
+		lastChar = string(prefix[len(prefix)-1])
+	}
+	lastNonWSChar := ""
+	if nwc, ok := contextfilter.LastNonWSChar(line, col); ok {
+		lastNonWSChar = string(nwc)
+	}
+
+	// Count leading whitespace characters (raw count, not indent units)
+	leadingWS := 0
+	for _, ch := range line {
+		if ch != ' ' && ch != '\t' {
+			break
+		}
+		leadingWS++
+	}
+
+	fileExt := strings.ToLower(filepath.Ext(e.buffer.Path()))
+	language := contextfilter.ExtToLanguage[fileExt]
+	if language == "" {
+		language = "unknown"
+	}
+
+	source := "typing"
+	if e.lastCompletionSource == types.CompletionSourceIdle {
+		source = "idle"
+	}
+
+	completionLines := 0
+	if len(e.completions) > 0 {
+		completionLines = len(e.completions[0].Lines)
+	}
+
+	timeSinceLastDecisionMs := 0
+	if !e.filterState.lastDecisionTime.IsZero() {
+		timeSinceLastDecisionMs = int(e.clock.Now().Sub(e.filterState.lastDecisionTime).Milliseconds())
+	}
+
+	// Diff history stats (edit count, predicted ratio, most recent edit across all files)
+	editCount, predictedCount, timeSinceLastEditMs := 0, 0, 0
+	now := e.clock.Now()
+	if diffs := e.getAllFileDiffHistories(); diffs != nil {
+		var latestTimestampNs int64
+		for _, fdh := range diffs {
+			for _, d := range fdh.DiffHistory {
+				editCount++
+				if d.Source == types.DiffSourcePredicted {
+					predictedCount++
+				}
+				if d.TimestampNs > latestTimestampNs {
+					latestTimestampNs = d.TimestampNs
+				}
+			}
+		}
+		if latestTimestampNs > 0 {
+			timeSinceLastEditMs = int(now.UnixMilli() - latestTimestampNs/1_000_000)
+		}
+	}
+	predictedEditRatio := 0.0
+	if editCount > 0 {
+		predictedEditRatio = float64(predictedCount) / float64(editCount)
+	}
+
+	typingSpeed := 0.0
+	if len(e.userActions) >= 2 {
+		insertCount := 0
+		for _, a := range e.userActions {
+			if a.ActionType == types.ActionInsertChar {
+				insertCount++
+			}
+		}
+		first := e.userActions[0]
+		last := e.userActions[len(e.userActions)-1]
+		if durationSec := float64(last.TimestampMs-first.TimestampMs) / 1000.0; durationSec > 0 {
+			typingSpeed = float64(insertCount) / durationSec
+		}
+	}
+
+	recentActions := make([]string, 0, 5)
+	start := len(e.userActions) - 5
+	if start < 0 {
+		start = 0
+	}
+	for _, a := range e.userActions[start:] {
+		if abbr, ok := actionAbbrev[a.ActionType]; ok {
+			recentActions = append(recentActions, abbr)
+		}
+	}
+
+	stageIndex := 0
+	if e.stagedCompletion != nil {
+		stageIndex = e.stagedCompletion.CurrentIdx
+	}
+
+	cursorTargetDistance := 0
+	if e.cursorTarget != nil {
+		dist := int(e.cursorTarget.LineNumber) - row
+		if dist < 0 {
+			dist = -dist
+		}
+		cursorTargetDistance = dist
+	}
+
+	return &metrics.Snapshot{
+		FileExt:                 fileExt,
+		Language:                language,
+		PrefixLength:            len(prefix),
+		TrimmedPrefixLength:     len(trimmedPrefix),
+		LineCount:               len(lines),
+		RelativePosition:        relativePosition,
+		AfterCursorWS:           contextfilter.AfterCursorIsWhitespace(lines, row, col),
+		LastChar:                lastChar,
+		LastNonWSChar:           lastNonWSChar,
+		IndentationLevel:        leadingWS,
+		PrevFilterShown:         e.filterState.lastShown,
+		FilterScore:             e.filterState.lastScore,
+		CompletionLines:         completionLines,
+		CompletionAdditions:     e.currentMetrics.Additions,
+		CompletionDeletions:     e.currentMetrics.Deletions,
+		CompletionSource:        source,
+		ManuallyTriggered:       e.manuallyTriggered,
+		Provider:                e.config.ProviderName,
+		StageIndex:              stageIndex,
+		CursorTargetDistance:    cursorTargetDistance,
+		IsPrefetched:            e.prefetchState == prefetchReady,
+		TimeSinceLastDecisionMs: timeSinceLastDecisionMs,
+		TimeSinceLastEditMs:     timeSinceLastEditMs,
+		TypingSpeed:             typingSpeed,
+		RecentActions:           recentActions,
+		HasDiagnostics:          false,   // filled async in sendMetric
+		TreesitterScope:         "other", // filled async in sendMetric
+		EditCount:               editCount,
+		PredictedEditRatio:      predictedEditRatio,
+		CompletionsSinceAccept:  e.completionsSinceAccept,
 	}
 }
 

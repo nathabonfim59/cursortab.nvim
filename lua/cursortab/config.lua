@@ -66,6 +66,7 @@
 ---@field keymaps CursortabKeymapsConfig
 ---@field ui CursortabUIConfig
 ---@field behavior CursortabBehaviorConfig
+---@field contribute_data boolean Opt-in: send anonymous completion metrics to the public dataset for model training
 ---@field provider CursortabProviderConfig
 ---@field blink CursortabBlinkConfig
 ---@field debug CursortabDebugConfig
@@ -76,6 +77,7 @@ local default_config = {
 	enabled = true,
 	log_level = "info",
 	state_dir = vim.fn.stdpath("state") .. "/cursortab",
+	contribute_data = false, -- Opt-in: send anonymous metrics to train a better gating model
 
 	keymaps = {
 		accept = "<Tab>", -- Keymap to accept completion, or false to disable

@@ -193,6 +193,7 @@ func (e *Engine) handleStreamLine(line string) {
 			if !needsNav {
 				// Stage is close to cursor - render it immediately
 				e.renderStreamedStage(finalized)
+				e.recordMetricsShown(nil)
 				ss.FirstStageRendered = true
 			}
 			// If needsNav, don't render - let Finalize() handle it with cursor prediction

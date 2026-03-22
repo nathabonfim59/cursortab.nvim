@@ -16,7 +16,9 @@ import (
 	"cursortab/ctx"
 	"cursortab/engine"
 	"cursortab/logger"
+	"cursortab/metrics"
 	"cursortab/provider/copilot"
+	"cursortab/provider/dataset"
 	"cursortab/provider/fim"
 	"cursortab/provider/inline"
 	"cursortab/provider/mercuryapi"
@@ -105,8 +107,19 @@ func NewDaemon(config Config) (*Daemon, error) {
 		provType == types.ProviderTypeCopilot ||
 		provType == types.ProviderTypeMercuryAPI
 
+	// Initialize dataset sender if user opted in to contribute data
+	var datasetSender metrics.Sender
+	if config.ContributeData {
+		datasetSender = dataset.NewSender(
+			providerConfig.DeviceID,
+			providerConfig.Version,
+			"", // Default: api.cursortab.com
+		)
+	}
+
 	eng, err := engine.NewEngine(prov, buf, engine.EngineConfig{
 		NsID:                config.NsID,
+		ProviderName:        config.Provider.Type,
 		CompletionTimeout:   time.Duration(config.Provider.CompletionTimeout) * time.Millisecond,
 		IdleCompletionDelay: time.Duration(config.Behavior.IdleCompletionDelay) * time.Millisecond,
 		TextChangeDebounce:  time.Duration(config.Behavior.TextChangeDebounce) * time.Millisecond,
@@ -120,7 +133,7 @@ func NewDaemon(config Config) (*Daemon, error) {
 		CompleteInInsert:       config.Behavior.CompleteInInsert,
 		CompleteInNormal:       config.Behavior.CompleteInNormal,
 		EditCompletionProvider: editCompletionProvider,
-	}, engine.SystemClock, ctx.NewGatherer(buf))
+	}, engine.SystemClock, ctx.NewGatherer(buf), datasetSender)
 	if err != nil {
 		return nil, err
 	}

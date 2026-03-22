@@ -89,8 +89,28 @@ function M.check()
 	vim.health.info("enabled: " .. (cfg.blink.enabled and "yes" or "no"))
 	vim.health.info("ghost_text: " .. (cfg.blink.ghost_text and "yes" or "no"))
 
+	-- UI
+	vim.health.start("UI")
+	vim.health.info("addition_style: " .. cfg.ui.completions.addition_style)
+	vim.health.info("fg_opacity: " .. cfg.ui.completions.fg_opacity)
+	vim.health.info("jump_symbol: " .. cfg.ui.jump.symbol)
+	vim.health.info("jump_text: " .. cfg.ui.jump.text)
+	vim.health.info("jump_show_distance: " .. (cfg.ui.jump.show_distance and "yes" or "no"))
+
+	-- FIM Tokens
+	vim.health.start("FIM Tokens")
+	vim.health.info("prefix: " .. cfg.provider.fim_tokens.prefix)
+	vim.health.info("suffix: " .. cfg.provider.fim_tokens.suffix)
+	vim.health.info("middle: " .. cfg.provider.fim_tokens.middle)
+
+	-- Debug
+	vim.health.start("Debug")
+	vim.health.info("immediate_shutdown: " .. (cfg.debug.immediate_shutdown and "yes" or "no"))
+
 	-- Paths
 	vim.health.start("Paths")
+	vim.health.info("enabled: " .. (cfg.enabled and "yes" or "no"))
+	vim.health.info("contribute_data: " .. (cfg.contribute_data and "yes" or "no"))
 	vim.health.info("state_dir: " .. cfg.state_dir)
 	vim.health.info("log_level: " .. cfg.log_level)
 end

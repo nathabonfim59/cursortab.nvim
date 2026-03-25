@@ -290,13 +290,6 @@ func (p *Provider) convertEdits(edits []CopilotEdit, req *types.CompletionReques
 			commands = append(commands, edit.Command)
 		}
 
-		// Validate version matches (avoid stale edits)
-		// Version 0 means Copilot didn't include version info - allow it
-		if edit.TextDoc.Version != 0 && edit.TextDoc.Version != req.Version {
-			logger.Debug("copilot: discarding stale edit %d (version %d != %d)", i, edit.TextDoc.Version, req.Version)
-			continue
-		}
-
 		completion := p.convertSingleEdit(edit, req, i)
 		if completion != nil {
 			completions = append(completions, completion)

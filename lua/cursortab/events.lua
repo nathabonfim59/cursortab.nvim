@@ -58,7 +58,7 @@ local function on_accept()
 		if ui.has_cursor_prediction() then
 			awaiting_completion_after_jump = true
 		end
-		daemon.send_event("accept")
+		daemon.send_event_immediate("accept")
 		return ""
 	else
 		return "\t"
@@ -77,7 +77,7 @@ local function on_partial_accept()
 		-- Suppress the immediate text change and cursor movement caused by partial accept
 		skip_next_text_changed = true
 		skip_next_cursor_moved = true
-		daemon.send_event("partial_accept")
+		daemon.send_event_immediate("partial_accept")
 		return ""
 	else
 		-- Pass through configured key

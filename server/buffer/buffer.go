@@ -968,7 +968,7 @@ func (b *NvimBuffer) SendCopilotNESRequest(reqID int64, uri string, version int,
 		local params = {
 			textDocument = {
 				uri = uri,
-				version = version,
+				version = vim.b.changedtick,
 			},
 			position = {
 				line = row - 1,  -- Convert to 0-indexed

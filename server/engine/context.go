@@ -212,7 +212,7 @@ func copyFirstN(lines []string, n int) []string {
 	if lines == nil {
 		return nil
 	}
-	if len(lines) <= n {
+	if n < 0 || len(lines) <= n {
 		return copyLines(lines)
 	}
 	return copyLines(lines[:n])

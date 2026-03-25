@@ -281,29 +281,6 @@ func TestConvertEdits_MultiLineEdit(t *testing.T) {
 	assert.Equal(t, 3, len(resp.Completions[0].Lines), "three lines")
 }
 
-func TestConvertEdits_StaleVersion(t *testing.T) {
-	p := &Provider{
-		pendingResult: make(chan *CopilotResult, 1),
-	}
-	req := &types.CompletionRequest{
-		Lines:   []string{"hello"},
-		Version: 5,
-	}
-	edits := []CopilotEdit{{
-		Text: "hello world",
-		Range: CopilotRange{
-			Start: CopilotPos{Line: 0, Character: 0},
-			End:   CopilotPos{Line: 0, Character: 5},
-		},
-		TextDoc: CopilotDoc{Version: 3}, // Stale version
-	}}
-
-	resp, err := p.convertEdits(edits, req)
-
-	assert.NoError(t, err, "no error")
-	assert.Nil(t, resp.Completions, "no completions for stale version")
-}
-
 func TestConvertEdits_NoOpEdit(t *testing.T) {
 	p := &Provider{
 		pendingResult: make(chan *CopilotResult, 1),

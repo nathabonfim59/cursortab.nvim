@@ -540,14 +540,14 @@ end
 ---@param current_win integer
 ---@param syntax_ft string
 ---@param ns_id integer
-local function render_replace_chars(group, nvim_line, current_win, syntax_ft, ns_id)
+local function render_replace_chars(group, nvim_line, virt_line_offset, current_win, syntax_ft, ns_id)
 	local content = group.lines[1] or ""
 	local old_content = (group.old_lines and group.old_lines[1]) or ""
 	local original_line_width = vim.fn.strdisplaywidth(old_content)
 
 	if content ~= "" then
 		local overlay_win, overlay_buf, bytes_trimmed =
-			create_overlay_window(current_win, nvim_line, 0, content, syntax_ft, nil, original_line_width, nil, ns_id)
+			create_overlay_window(current_win, nvim_line + virt_line_offset, 0, content, syntax_ft, nil, original_line_width, nil, ns_id)
 		table.insert(completion_windows, { win_id = overlay_win, buf_id = overlay_buf })
 
 		-- Highlight the changed portion
@@ -761,7 +761,11 @@ local function show_completion(diff_result)
 		local nvim_line = group.buffer_line - 1 -- 0-indexed for nvim API
 
 		-- Handle character-level render hints (single-line only)
-		if is_single_line and group.render_hint and group.render_hint ~= "" then
+		-- "stacked" is a layout hint for modifications, not a character-level hint
+		local is_char_hint = group.render_hint == "append_chars"
+			or group.render_hint == "replace_chars"
+			or group.render_hint == "delete_chars"
+		if is_single_line and is_char_hint then
 			if group.render_hint == "append_chars" then
 				local is_first = not found_first_append
 				render_append_chars(
@@ -778,7 +782,7 @@ local function show_completion(diff_result)
 					found_first_append = true
 				end
 			elseif group.render_hint == "replace_chars" then
-				render_replace_chars(group, nvim_line, current_win, syntax_ft, ns_id)
+				render_replace_chars(group, nvim_line, virt_line_offset, current_win, syntax_ft, ns_id)
 			elseif group.render_hint == "delete_chars" then
 				render_delete_chars(group, nvim_line, current_buf, ns_id)
 			end

@@ -163,8 +163,8 @@ func (p *Provider) GetCompletion(ctx context.Context, req *types.CompletionReque
 	}
 	p.mu.Unlock()
 
-	p.logRequest(reqID, uri, req.Version, req.CursorRow, req.CursorCol)
-	if err := p.buffer.SendCopilotNESRequest(reqID, uri, req.Version, req.CursorRow, req.CursorCol); err != nil {
+	p.logRequest(reqID, uri, req.ChangedTick, req.CursorRow, req.CursorCol)
+	if err := p.buffer.SendCopilotNESRequest(reqID, uri, req.ChangedTick, req.CursorRow, req.CursorCol); err != nil {
 		logger.Error("failed to send NES request: %v", err)
 		return p.emptyResponse(), nil
 	}
@@ -254,9 +254,9 @@ func (p *Provider) ensureHandlerRegistered(clientID int) error {
 	return nil
 }
 
-func (p *Provider) logRequest(reqID int64, uri string, version, cursorRow, cursorCol int) {
-	logger.Debug("copilot request:\n  ReqID: %d\n  URI: %s\n  Version: %d\n  CursorRow: %d\n  CursorCol: %d",
-		reqID, uri, version, cursorRow, cursorCol)
+func (p *Provider) logRequest(reqID int64, uri string, changedTick, cursorRow, cursorCol int) {
+	logger.Debug("copilot request:\n  ReqID: %d\n  URI: %s\n  ChangedTick: %d\n  CursorRow: %d\n  CursorCol: %d",
+		reqID, uri, changedTick, cursorRow, cursorCol)
 }
 
 func (p *Provider) logResponse(edits []CopilotEdit) {
@@ -285,6 +285,15 @@ func (p *Provider) convertEdits(edits []CopilotEdit, req *types.CompletionReques
 	var completions []*types.Completion
 
 	for i, edit := range edits {
+		// Validate that the edit's document version matches our buffer snapshot.
+		// Copilot's range refers to line/column positions in its document version;
+		// if our snapshot is from a different version, those positions are wrong.
+		if edit.TextDoc.Version != 0 && req.ChangedTick != 0 && edit.TextDoc.Version != req.ChangedTick {
+			logger.Debug("copilot: edit %d version mismatch (response=%d, snapshot=%d), discarding",
+				i, edit.TextDoc.Version, req.ChangedTick)
+			continue
+		}
+
 		// Store command for telemetry
 		if edit.Command != nil {
 			commands = append(commands, edit.Command)

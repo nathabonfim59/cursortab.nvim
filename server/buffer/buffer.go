@@ -27,6 +27,7 @@ type NvimBuffer struct {
 	col           int // 0-indexed
 	path          string
 	version       int
+	changedTick   int                // Neovim's b:changedtick captured during Sync
 	diffHistories []*types.DiffEntry // Structured diff history for provider consumption
 	previousLines []string           // Buffer content before the most recent edit (for sweep provider)
 
@@ -87,6 +88,8 @@ func (b *NvimBuffer) Col() int { return b.col }
 func (b *NvimBuffer) Path() string { return b.path }
 
 func (b *NvimBuffer) Version() int { return b.version }
+
+func (b *NvimBuffer) ChangedTick() int { return b.changedTick }
 
 func (b *NvimBuffer) ViewportBounds() (top, bottom int) {
 	return b.viewportTop, b.viewportBottom
@@ -189,6 +192,7 @@ func (b *NvimBuffer) Sync(workspacePath string) (*SyncResult, error) {
 	var cursor [2]int
 	var scrollOffset int
 	var nvimCwd string
+	var changedTick int
 
 	batch.CurrentBuffer(&currentBuf)
 	batch.BufferName(nvim.Buffer(0), &path) // Use 0 for current buffer
@@ -198,6 +202,9 @@ func (b *NvimBuffer) Sync(workspacePath string) (*SyncResult, error) {
 
 	// Get Neovim's current working directory
 	batch.ExecLua(`return vim.fn.getcwd()`, &nvimCwd, nil)
+
+	// Capture changedtick atomically with buffer lines
+	batch.ExecLua(`return vim.b.changedtick`, &changedTick, nil)
 
 	// Get horizontal scroll offset (leftcol) from current window
 	batch.ExecLua(`
@@ -235,6 +242,7 @@ func (b *NvimBuffer) Sync(workspacePath string) (*SyncResult, error) {
 	b.row = cursor[0]              // Line (vertical position, 1-based in nvim cursor)
 	b.col = cursor[1]              // Column (horizontal position, 0-based in nvim cursor)
 	b.scrollOffsetX = scrollOffset // Horizontal scroll offset
+	b.changedTick = changedTick    // Neovim's buffer version for LSP
 
 	// Update viewport bounds (1-indexed)
 	b.viewportTop = viewportInfo[0]
@@ -972,7 +980,7 @@ func (b *NvimBuffer) SendCopilotNESRequest(reqID int64, uri string, version int,
 		local params = {
 			textDocument = {
 				uri = uri,
-				version = vim.b.changedtick,
+				version = version,
 			},
 			position = {
 				line = row - 1,  -- Convert to 0-indexed

@@ -453,8 +453,8 @@ function config.setup(user_config)
 	local p = current_config.provider
 	local user_p = migrated.provider or {}
 	local provider_defaults = {
-		inline = { context_size = 1024, max_tokens = 128 },
-		fim = { context_size = 1024, max_tokens = 256 },
+		inline = { context_size = 1024, max_tokens = 64 },
+		fim = { context_size = 1024, max_tokens = 128 },
 	}
 	local defaults = provider_defaults[p.type]
 	if defaults then

@@ -209,7 +209,7 @@ require("cursortab").setup({
     model = "",                           -- Model name
     temperature = 0.0,                    -- Sampling temperature
     context_size = 0,                     -- Max input context in tokens (0 = use max_tokens; inline/fim default: 1024)
-    max_tokens = 512,                     -- Max tokens to generate (inline default: 128, fim default: 256)
+    max_tokens = 512,                     -- Max tokens to generate (inline default: 64, fim default: 128)
     top_k = 50,                           -- Top-k sampling
     completion_timeout = 5000,            -- Timeout in ms for completion requests
     max_diff_history_tokens = 512,        -- Max tokens for diff history (0 = no limit)

@@ -108,7 +108,7 @@ Full configuration with defaults: >lua
       model = "",
       temperature = 0.0,
       context_size = 0,               -- 0 = use max_tokens (inline/fim default: 1024)
-      max_tokens = 512,               -- inline default: 128, fim default: 256
+      max_tokens = 512,               -- inline default: 64, fim default: 128
       top_k = 50,
       completion_timeout = 5000,    -- ms
       max_diff_history_tokens = 512,

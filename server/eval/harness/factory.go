@@ -60,8 +60,8 @@ func BuildProviderForTarget(t Target, baseCfg *types.ProviderConfig, transport h
 		if cfg.ProviderContextSize == 0 {
 			cfg.ProviderContextSize = 1024
 		}
-		if cfg.ProviderMaxTokens == 0 || cfg.ProviderMaxTokens > 256 {
-			cfg.ProviderMaxTokens = 256
+		if cfg.ProviderMaxTokens == 0 || cfg.ProviderMaxTokens > 128 {
+			cfg.ProviderMaxTokens = 128
 		}
 		if cfg.FIMTokens.Prefix == "" {
 			cfg.FIMTokens = types.FIMTokenConfig{

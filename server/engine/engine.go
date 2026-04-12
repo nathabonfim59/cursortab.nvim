@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"cursortab/buffer"
-	"cursortab/contextfilter"
 	"cursortab/ctx"
 	"cursortab/logger"
 	"cursortab/metrics"
@@ -121,9 +120,6 @@ type Engine struct {
 	lastBufferLines  []string            // For detecting text changes
 	lastCursorOffset int                 // For cursor movement detection
 
-	// Contextual filter state (tracks momentum across filter invocations)
-	filterState contextualFilterState
-
 	// Metrics tracking (engine owns state, provider implements Sender)
 	metricSender    metrics.Sender
 	currentMetrics  metrics.CompletionInfo
@@ -171,7 +167,10 @@ func NewEngine(provider Provider, buf Buffer, config EngineConfig, clock Clock, 
 	}
 
 	// Initialize metrics: combine provider sender + community sender if available
-	providerSender, _ := provider.(metrics.Sender)
+	var providerSender metrics.Sender
+	if !config.DisableProviderMetrics {
+		providerSender, _ = provider.(metrics.Sender)
+	}
 	switch {
 	case providerSender != nil && communitySender != nil:
 		e.metricSender = metrics.NewMultiSender(providerSender, communitySender)
@@ -231,12 +230,19 @@ func (e *Engine) Stop() {
 		e.prefetchedCursorTarget = nil
 		e.prefetchState = prefetchNone
 		e.completionOriginalLines = nil
+		// Cancel the main context BEFORE closing channels. In-flight
+		// goroutines (e.g. the prefetch sender at request.go:206) select on
+		// mainCtx.Done() vs eventChan <- …; if we closed the channel first
+		// they'd panic on a send-to-closed-channel. Canceling first gives
+		// them a chance to exit via the Done branch. We still close the
+		// channels afterward so the event loop's `<-eventChan` path and
+		// metricsWorker's `for range` exit cleanly.
+		if e.mainCancel != nil {
+			e.mainCancel()
+		}
 		close(e.eventChan)
 		if e.metricsCh != nil {
 			close(e.metricsCh)
-		}
-		if e.mainCancel != nil {
-			e.mainCancel()
 		}
 
 		logger.Info("engine stopped")
@@ -648,12 +654,12 @@ func (e *Engine) captureSnapshot() *metrics.Snapshot {
 	lines := e.buffer.Lines()
 	row := e.buffer.Row()
 
-	line, col := contextfilter.CurrentLine(lines, row, e.buffer.Col())
+	line, col := currentLine(lines, row, e.buffer.Col())
 	prefix := line[:col]
 	trimmedPrefix := strings.TrimRight(prefix, " \t")
 
-	docLen := contextfilter.DocumentByteLength(lines)
-	cursorOffset := contextfilter.ByteOffset(lines, row, col)
+	docLen := documentByteLength(lines)
+	cursorOffset := byteOffset(lines, row, col)
 	relativePosition := 0.0
 	if docLen > 0 {
 		relativePosition = (float64(cursorOffset) + 0.5) / (1.0 + float64(docLen))
@@ -663,9 +669,9 @@ func (e *Engine) captureSnapshot() *metrics.Snapshot {
 	if len(prefix) > 0 {
 		lastChar = string(prefix[len(prefix)-1])
 	}
-	lastNonWSChar := ""
-	if nwc, ok := contextfilter.LastNonWSChar(line, col); ok {
-		lastNonWSChar = string(nwc)
+	lastNWS := ""
+	if nwc, ok := lastNonWSChar(line, col); ok {
+		lastNWS = string(nwc)
 	}
 
 	// Count leading whitespace characters (raw count, not indent units)
@@ -678,7 +684,7 @@ func (e *Engine) captureSnapshot() *metrics.Snapshot {
 	}
 
 	fileExt := strings.ToLower(filepath.Ext(e.buffer.Path()))
-	language := contextfilter.ExtToLanguage[fileExt]
+	language := extToLanguage[fileExt]
 	if language == "" {
 		language = "unknown"
 	}
@@ -691,11 +697,6 @@ func (e *Engine) captureSnapshot() *metrics.Snapshot {
 	completionLines := 0
 	if len(e.completions) > 0 {
 		completionLines = len(e.completions[0].Lines)
-	}
-
-	timeSinceLastDecisionMs := 0
-	if !e.filterState.lastDecisionTime.IsZero() {
-		timeSinceLastDecisionMs = int(e.clock.Now().Sub(e.filterState.lastDecisionTime).Milliseconds())
 	}
 
 	// Diff history stats (edit count, predicted ratio, most recent edit across all files)
@@ -764,36 +765,33 @@ func (e *Engine) captureSnapshot() *metrics.Snapshot {
 	}
 
 	return &metrics.Snapshot{
-		FileExt:                 fileExt,
-		Language:                language,
-		PrefixLength:            len(prefix),
-		TrimmedPrefixLength:     len(trimmedPrefix),
-		LineCount:               len(lines),
-		RelativePosition:        relativePosition,
-		AfterCursorWS:           contextfilter.AfterCursorIsWhitespace(lines, row, col),
-		LastChar:                lastChar,
-		LastNonWSChar:           lastNonWSChar,
-		IndentationLevel:        leadingWS,
-		PrevFilterShown:         e.filterState.lastShown,
-		FilterScore:             e.filterState.lastScore,
-		CompletionLines:         completionLines,
-		CompletionAdditions:     e.currentMetrics.Additions,
-		CompletionDeletions:     e.currentMetrics.Deletions,
-		CompletionSource:        source,
-		ManuallyTriggered:       e.manuallyTriggered,
-		Provider:                e.config.ProviderName,
-		StageIndex:              stageIndex,
-		CursorTargetDistance:    cursorTargetDistance,
-		IsPrefetched:            e.prefetchState == prefetchReady,
-		TimeSinceLastDecisionMs: timeSinceLastDecisionMs,
-		TimeSinceLastEditMs:     timeSinceLastEditMs,
-		TypingSpeed:             typingSpeed,
-		RecentActions:           recentActions,
-		HasDiagnostics:          false,   // filled async in sendMetric
-		TreesitterScope:         "other", // filled async in sendMetric
-		EditCount:               editCount,
-		PredictedEditRatio:      predictedEditRatio,
-		CompletionsSinceAccept:  e.completionsSinceAccept,
+		FileExt:                fileExt,
+		Language:               language,
+		PrefixLength:           len(prefix),
+		TrimmedPrefixLength:    len(trimmedPrefix),
+		LineCount:              len(lines),
+		RelativePosition:       relativePosition,
+		AfterCursorWS:          afterCursorIsWhitespace(lines, row, col),
+		LastChar:               lastChar,
+		LastNonWSChar:          lastNWS,
+		IndentationLevel:       leadingWS,
+		CompletionLines:        completionLines,
+		CompletionAdditions:    e.currentMetrics.Additions,
+		CompletionDeletions:    e.currentMetrics.Deletions,
+		CompletionSource:       source,
+		ManuallyTriggered:      e.manuallyTriggered,
+		Provider:               e.config.ProviderName,
+		StageIndex:             stageIndex,
+		CursorTargetDistance:   cursorTargetDistance,
+		IsPrefetched:           e.prefetchState == prefetchReady,
+		TimeSinceLastEditMs:    timeSinceLastEditMs,
+		TypingSpeed:            typingSpeed,
+		RecentActions:          recentActions,
+		HasDiagnostics:         false,   // filled async in sendMetric
+		TreesitterScope:        "other", // filled async in sendMetric
+		EditCount:              editCount,
+		PredictedEditRatio:     predictedEditRatio,
+		CompletionsSinceAccept: e.completionsSinceAccept,
 	}
 }
 

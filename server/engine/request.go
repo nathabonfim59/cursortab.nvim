@@ -41,6 +41,12 @@ func (e *Engine) requestCompletion(source types.CompletionSource) {
 		return
 	}
 
+	// Scope suppression: don't complete inside disabled treesitter scopes
+	if scope := e.suppressForDisabledScope(); !e.manuallyTriggered && scope != "" {
+		logger.Debug("suppressed: disabled treesitter scope %q", scope)
+		return
+	}
+
 	// Mid-line suppression applies to all sources for insertion-only providers
 	if !e.manuallyTriggered && e.suppressForMidLine() {
 		logger.Debug("suppressed: mid-line cursor position")
@@ -50,12 +56,6 @@ func (e *Engine) requestCompletion(source types.CompletionSource) {
 	// Deletion suppression only applies to typing (idle completions after deleting are fine)
 	if source == types.CompletionSourceTyping && !e.manuallyTriggered && e.suppressForSingleDeletion() {
 		logger.Debug("suppressed: single deletion")
-		return
-	}
-
-	// Contextual filter: predict acceptance probability from cursor context.
-	// Suppresses low-value requests before they reach the provider.
-	if !e.manuallyTriggered && e.suppressForContextualFilter() {
 		return
 	}
 
@@ -69,6 +69,7 @@ func (e *Engine) requestCompletion(source types.CompletionSource) {
 		Lines:                 e.buffer.Lines(),
 		Version:               e.buffer.Version(),
 		PreviousLines:         e.buffer.PreviousLines(),
+		OriginalLines:         e.buffer.OriginalLines(),
 		FileDiffHistories:     e.getAllFileDiffHistories(),
 		CursorRow:             e.buffer.Row(),
 		CursorCol:             e.buffer.Col(),
@@ -178,6 +179,15 @@ func (e *Engine) requestPrefetch(source types.CompletionSource, overrideRow, ove
 
 	go func() {
 		defer cancel()
+		// Stop() cancels mainCtx and closes eventChan in that order. There's
+		// still a race where this goroutine can commit to the send branch
+		// of the select below just as the channel is being closed. Recover
+		// so the in-flight prefetch doesn't tear the whole process down.
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Debug("prefetch goroutine recovered from panic during shutdown: %v", r)
+			}
+		}()
 
 		result, err := e.provider.GetCompletion(ctx, &types.CompletionRequest{
 			Source:            source,
@@ -228,6 +238,12 @@ func (e *Engine) handlePrefetchReady(resp *types.CompletionResponse) {
 	if previousPrefetchState == prefetchWaitingForCursorPrediction {
 		// Don't interrupt an active completion - let user accept/reject it first
 		if e.state == stateHasCompletion || e.state == stateStreamingCompletion {
+			return
+		}
+		// Don't replace a staged completion's cursor target — it points to the
+		// next stage the user needs to accept. The prefetch result stays stored
+		// and will be consumed after all stages are finished.
+		if e.state == stateHasCursorTarget && e.hasMoreStages() {
 			return
 		}
 		e.handlePrefetchCursorPrediction()

@@ -81,6 +81,7 @@ local function start_daemon()
 			idle_completion_delay = cfg.behavior.idle_completion_delay,
 			text_change_debounce = cfg.behavior.text_change_debounce,
 			max_visible_lines = cfg.behavior.max_visible_lines,
+			disabled_in = cfg.behavior.disabled_in,
 			complete_in_insert = vim.tbl_contains(cfg.behavior.enabled_modes, "insert"),
 			complete_in_normal = vim.tbl_contains(cfg.behavior.enabled_modes, "normal"),
 			cursor_prediction = {
@@ -95,6 +96,7 @@ local function start_daemon()
 			api_key_env = cfg.provider.api_key_env,
 			model = cfg.provider.model,
 			temperature = cfg.provider.temperature,
+			context_size = cfg.provider.context_size,
 			max_tokens = cfg.provider.max_tokens,
 			top_k = cfg.provider.top_k,
 			completion_timeout = cfg.provider.completion_timeout,

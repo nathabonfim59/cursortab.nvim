@@ -122,4 +122,29 @@ function M.get_context(bufnr, row, col, max_siblings)
 	}
 end
 
+---Get treesitter node types from cursor to root.
+---@param bufnr integer Buffer number
+---@param row integer 1-indexed cursor row
+---@param col integer 0-indexed cursor column
+---@return string[]
+function M.cursor_scopes(bufnr, row, col)
+	row = row - 1 -- convert to 0-indexed
+	-- Query the character just typed, not the position after it
+	if col > 0 then
+		col = col - 1
+	end
+
+	local node = vim.treesitter.get_node({ bufnr = bufnr, pos = { row, col } })
+	if not node then
+		return {}
+	end
+
+	local scopes = {}
+	while node do
+		scopes[#scopes + 1] = node:type()
+		node = node:parent()
+	end
+	return scopes
+end
+
 return M

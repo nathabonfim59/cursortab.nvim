@@ -24,6 +24,7 @@ package sweepapi
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -221,6 +222,12 @@ func NewProvider(config *types.ProviderConfig) *Provider {
 	}
 }
 
+// SetHTTPTransport forwards the transport override to the underlying client.
+// Used by the eval harness for cassette record/replay.
+func (p *Provider) SetHTTPTransport(rt http.RoundTripper) {
+	p.client.SetHTTPTransport(rt)
+}
+
 // SendMetric implements metrics.Sender
 func (p *Provider) SendMetric(ctx context.Context, event metrics.Event) {
 	var sweepEvent sweepapi.EventType
@@ -287,6 +294,7 @@ func (p *Provider) PrepareLineStream(ctx context.Context, req *types.CompletionR
 	}
 
 	fileContents := strings.Join(lines, "\n")
+	originalFileContents := p.buildOriginalFileContents(req.OriginalLines, fileContents)
 	cursorPosition := sweepapi.CursorToByteOffset(lines, cursorRow, cursorCol)
 
 	diffHistories := p.truncateDiffHistories(req.FileDiffHistories)
@@ -305,7 +313,7 @@ func (p *Provider) PrepareLineStream(ctx context.Context, req *types.CompletionR
 		RepoName:             repoName,
 		FilePath:             req.FilePath,
 		FileContents:         fileContents,
-		OriginalFileContents: fileContents,
+		OriginalFileContents: originalFileContents,
 		CursorPosition:       cursorPosition,
 		RecentChanges:        recentChanges,
 		ChangesAboveCursor:   true,
@@ -378,6 +386,7 @@ func (p *Provider) GetCompletion(ctx context.Context, req *types.CompletionReque
 
 	// Build file contents from lines
 	fileContents := strings.Join(lines, "\n")
+	originalFileContents := p.buildOriginalFileContents(req.OriginalLines, fileContents)
 
 	// Convert cursor to byte offset
 	cursorPosition := sweepapi.CursorToByteOffset(lines, cursorRow, cursorCol)
@@ -402,7 +411,7 @@ func (p *Provider) GetCompletion(ctx context.Context, req *types.CompletionReque
 		RepoName:             repoName,
 		FilePath:             req.FilePath,
 		FileContents:         fileContents,
-		OriginalFileContents: fileContents,
+		OriginalFileContents: originalFileContents,
 		CursorPosition:       cursorPosition,
 		RecentChanges:        recentChanges,
 		ChangesAboveCursor:   true,
@@ -687,6 +696,15 @@ func formatGitDiffChunk(gd *types.GitDiffContext) []sweepapi.FileChunk {
 		StartLine: 1,
 		EndLine:   strings.Count(gd.Diff, "\n"),
 	}}
+}
+
+// buildOriginalFileContents returns the original file contents for the API.
+// Falls back to the current fileContents when no original lines are available.
+func (p *Provider) buildOriginalFileContents(originalLines []string, fileContents string) string {
+	if len(originalLines) == 0 {
+		return fileContents
+	}
+	return strings.Join(originalLines, "\n")
 }
 
 // convertUserActions converts types.UserAction to sweepapi.UserAction.

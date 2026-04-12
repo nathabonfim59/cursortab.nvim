@@ -22,17 +22,21 @@ A Neovim plugin that provides local edit completions and cursor predictions.
 
 * [Requirements](#requirements)
 * [Installation](#installation)
+  * [Mercury API (hosted, no local GPU needed)](#mercury-api-hosted-no-local-gpu-needed)
+  * [Zeta-2 (local next-edit prediction)](#zeta-2-local-next-edit-prediction)
+  * [Qwen3.5-0.8B (fastest local)](#qwen35-08b-fastest-local)
   * [Using lazy.nvim](#using-lazynvim)
   * [Using packer.nvim](#using-packernvim)
-* [Quick Start](#quick-start)
 * [Configuration](#configuration)
   * [Highlight Groups](#highlight-groups)
   * [Providers](#providers)
+    * [Benchmarks](#benchmarks)
     * [Inline Provider (Default)](#inline-provider-default)
     * [FIM Provider](#fim-provider)
     * [Sweep Provider](#sweep-provider)
     * [Sweep API Provider](#sweep-api-provider)
-    * [Zeta Provider](#zeta-provider)
+    * [Zeta-2 Provider](#zeta-2-provider)
+    * [Zeta Provider (legacy)](#zeta-provider-legacy)
     * [Copilot Provider](#copilot-provider)
     * [Windsurf Provider](#windsurf-provider)
     * [Mercury API Provider](#mercury-api-provider)
@@ -40,8 +44,6 @@ A Neovim plugin that provides local edit completions and cursor predictions.
 * [Usage](#usage)
   * [Commands](#commands)
 * [Development](#development)
-  * [Build](#build)
-  * [Test](#test)
 * [FAQ](#faq)
 * [Contributing](#contributing)
 * [License](#license)
@@ -55,6 +57,41 @@ A Neovim plugin that provides local edit completions and cursor predictions.
 
 ## Installation
 
+Recommended starting points:
+
+- **Best hosted:** Mercury API
+- **Best local next-edit:** Zeta-2
+- **Fastest local:** Qwen3.5-0.8B with the `fim` or `inline` provider, or Sweep
+  1.5B/0.5B with the `sweep` provider
+
+Pick a provider below, then use the matching `setup()` call in your plugin
+config. See [Providers](#providers) for all available options.
+
+### Mercury API (hosted, no local GPU needed)
+
+1. Get an API key from [Inception Labs](https://docs.inceptionlabs.ai/)
+2. Set the environment variable:
+
+   ```bash
+   export MERCURY_AI_TOKEN="your-api-key-here"
+   ```
+
+### Zeta-2 (local next-edit prediction)
+
+Run [llama.cpp](https://github.com/ggml-org/llama.cpp):
+
+```bash
+llama-server -hf bartowski/zed-industries_zeta-2-GGUF:Q8_0 --port 8000
+```
+
+### Qwen3.5-0.8B (fastest local)
+
+Run [llama.cpp](https://github.com/ggml-org/llama.cpp):
+
+```bash
+llama-server -hf unsloth/Qwen3.5-0.8B-GGUF:Q8_0 --port 8000
+```
+
 ### Using [lazy.nvim](https://github.com/folke/lazy.nvim)
 
 ```lua
@@ -64,7 +101,22 @@ A Neovim plugin that provides local edit completions and cursor predictions.
   lazy = false,      -- The server is already lazy loaded
   build = "cd server && go build",
   config = function()
-    require("cursortab").setup()
+    require("cursortab").setup({
+      provider = {
+        -- Mercury API (hosted)
+        type = "mercuryapi",
+        api_key_env = "MERCURY_AI_TOKEN",
+
+        -- Zeta-2 (local)
+        -- type = "zeta-2",
+        -- url = "http://localhost:8000",
+        -- model = "zeta-2",
+
+        -- Qwen3.5-0.8B (fastest local, use "fim" or "inline")
+        -- type = "fim",
+        -- url = "http://localhost:8000",
+      },
+    })
   end,
 }
 ```
@@ -77,53 +129,20 @@ use {
   -- tag = "*",  -- Use latest tagged version for more stability
   run = "cd server && go build",
   config = function()
-    require("cursortab").setup()
+    require("cursortab").setup({
+      provider = {
+        type = "mercuryapi",
+        api_key_env = "MERCURY_AI_TOKEN",
+      },
+    })
   end
 }
 ```
 
-## Quick Start
-
-The fastest way to get started is with the **Mercury API** provider (hosted, no
-local GPU needed):
-
-1. Get an API key from [Inception Labs](https://docs.inceptionlabs.ai/)
-2. Set the environment variable:
-
-   ```bash
-   export MERCURY_AI_TOKEN="your-api-key-here"
-   ```
-
-3. Add the provider to your setup:
-
-   ```lua
-   require("cursortab").setup({
-     provider = {
-       type = "mercuryapi",
-       api_key_env = "MERCURY_AI_TOKEN",
-     },
-   })
-   ```
-
-If you prefer **local inference**, use the `sweep` provider with
-[llama.cpp](https://github.com/ggml-org/llama.cpp):
-
-```bash
-llama-server -hf sweepai/sweep-next-edit-1.5b --port 8000
-```
-
-```lua
-require("cursortab").setup({
-  provider = {
-    type = "sweep",
-    url = "http://localhost:8000",
-  },
-})
-```
-
-See [Providers](#providers) for all available options.
-
 ## Configuration
+
+<details>
+<summary>Full config</summary>
 
 ```lua
 require("cursortab").setup({
@@ -154,6 +173,7 @@ require("cursortab").setup({
     idle_completion_delay = 50,  -- Delay in ms after idle to trigger completion (-1 to disable)
     text_change_debounce = 50,   -- Debounce in ms after text change to trigger completion (-1 to disable)
     max_visible_lines = 12,      -- Max visible lines per completion (0 to disable)
+    disabled_in = {},                         -- Tree-sitter scopes to suppress completions (e.g., { "comment", "string" })
     enabled_modes = { "insert", "normal" },  -- Modes where completions are active
     cursor_prediction = {
       enabled = true,            -- Show jump indicators after completions
@@ -184,12 +204,13 @@ require("cursortab").setup({
   },
 
   provider = {
-    type = "inline",                      -- Provider: "inline", "fim", "sweep", "sweepapi", "zeta", "copilot", "windsurf", or "mercuryapi"
+type = "inline",                      -- Provider: "inline", "fim", "sweep", "sweepapi", "zeta", "zeta-2", "copilot", "windsurf", or "mercuryapi"
     url = "http://localhost:8000",        -- URL of the provider server
     api_key_env = "",                     -- Env var name for API key (e.g., "OPENAI_API_KEY")
     model = "",                           -- Model name
     temperature = 0.0,                    -- Sampling temperature
-    max_tokens = 512,                     -- Max tokens to generate
+    context_size = 0,                     -- Max input context in tokens (0 = use max_tokens; inline/fim default: 1024)
+    max_tokens = 512,                     -- Max tokens to generate (inline default: 64, fim default: 128)
     top_k = 50,                           -- Top-k sampling
     completion_timeout = 5000,            -- Timeout in ms for completion requests
     max_diff_history_tokens = 512,        -- Max tokens for diff history (0 = no limit)
@@ -213,7 +234,9 @@ require("cursortab").setup({
 })
 ```
 
-For detailed configuration documentation, see `:help cursortab-config`.
+</details>
+
+You can also run `:help cursortab-config` to see the configuration.
 
 ### Highlight Groups
 
@@ -238,45 +261,40 @@ vim.api.nvim_set_hl(0, "CursorTabAddition", { bg = "#1a3a1a" })
 ### Providers
 
 The plugin supports eight AI provider backends: Inline, FIM, Sweep, Sweep API,
-Zeta, Copilot, Windsurf, and Mercury API.
+The plugin supports nine AI provider backends: Inline, FIM, Sweep, Sweep API,
+Zeta-2, Zeta (legacy), Copilot, Windsurf, and Mercury API.
 
-| Provider     | Hosted | Multi-line | Multi-edit | Cursor Prediction | Streaming | Model                  |
-| ------------ | :----: | :--------: | :--------: | :---------------: | :-------: | ---------------------- |
-| `inline`     |        |            |            |                   |           | Any base model         |
-| `fim`        |        |     ✓      |            |                   |     ✓     | Any FIM-capable        |
-| `sweep`      |        |     ✓      |     ✓      |         ✓         |     ✓     | Sweep Next-Edit family |
-| `sweepapi`   |   ✓    |     ✓      |     ✓      |         ✓         |     ✓     | `sweep-next-edit-7b`   |
-| `zeta`       |        |     ✓      |     ✓      |         ✓         |     ✓     | `zeta`                 |
-| `copilot`    |   ✓    |     ✓      |     ✓      |         ✓         |           | GitHub Copilot         |
-| `windsurf`   |   ✓    |     ✓      |     ✓      |         ✓         |           | Codeium                |
-| `mercuryapi` |   ✓    |     ✓      |     ✓      |         ✓         |           | `mercury-edit`         |
+| Provider     | Hosted | Multi-line | Multi-edit | Cursor Prediction | Streaming | Model                   |
+| ------------ | :----: | :--------: | :--------: | :---------------: | :-------: | ----------------------- |
+| `inline`     |        |            |            |                   |           | Any base model          |
+| `fim`        |        |     ✓      |            |                   |     ✓     | Any FIM-capable         |
+| `sweep`      |        |     ✓      |     ✓      |         ✓         |     ✓     | Sweep Next-Edit family  |
+| `sweepapi`   |   ✓    |     ✓      |     ✓      |         ✓         |     ✓     | `sweep-next-edit-7b`    |
+| `zeta-2`     |        |     ✓      |     ✓      |         ✓         |     ✓     | `zeta-2` (SeedCoder-8B) |
+| `zeta`       |        |     ✓      |     ✓      |         ✓         |     ✓     | `zeta` (Qwen2.5-Coder)  |
+| `copilot`    |   ✓    |     ✓      |     ✓      |         ✓         |           | GitHub Copilot          |
+| `windsurf`   |   ✓    |     ✓      |     ✓      |         ✓         |           | Codeium                 |
+| `mercuryapi` |   ✓    |     ✓      |     ✓      |         ✓         |           | `mercury-edit`          |
 
 **Context Per Provider:**
 
-| Context             | inline | fim | sweep | zeta | sweepapi | copilot | windsurf | mercuryapi |
-| ------------------- | :----: | :-: | :---: | :--: | :------: | :-----: | :------: | :--------: |
-| Buffer content      |   ✓    |  ✓  |   ✓   |  ✓   |    ✓     |         |    ✓     |     ✓      |
-| Edit history        |        |     |   ✓   |  ✓   |    ✓     |         |          |     ✓      |
-| Previous file state |        |     |   ✓   |      |    ✓     |         |          |            |
-| LSP diagnostics     |        |     |       |  ✓   |    ✓     |         |          |     ✓      |
-| Treesitter context  |        |     |   ✓   |  ✓   |    ✓     |         |          |     ✓      |
-| Git diff context    |        |     |   ✓   |  ✓   |    ✓     |         |          |     ✓      |
-| Recent files        |        |     |       |      |    ✓     |         |          |     ✓      |
-| User actions        |        |     |       |      |    ✓     |         |          |            |
+| Context             | inline | fim | sweep | zeta-2 | zeta | sweepapi | copilot | windsurf | mercuryapi |
+| ------------------- | :----: | :-: | :---: | :----: | :--: | :------: | :-----: | :------: | :--------: |
+| Buffer content      |   ✓    |  ✓  |   ✓   |   ✓    |  ✓   |    ✓     |         |    ✓     |     ✓      |
+| Edit history        |        |     |   ✓   |   ✓    |  ✓   |    ✓     |         |          |     ✓      |
+| Previous file state |        |     |   ✓   |        |      |    ✓     |         |          |            |
+| LSP diagnostics     |        |     |       |   ✓    |  ✓   |    ✓     |         |          |     ✓      |
+| Treesitter context  |        |     |   ✓   |   ✓    |  ✓   |    ✓     |         |          |     ✓      |
+| Git diff context    |        |     |   ✓   |   ✓    |  ✓   |    ✓     |         |          |     ✓      |
+| Recent files        |        |     |   ✓   |   ✓    |  ✓   |    ✓     |         |          |     ✓      |
+| User actions        |        |     |   ✓   |        |      |    ✓     |         |          |            |
 
 #### Inline Provider (Default)
 
 <details>
 <summary>Details</summary>
 
-End-of-line completion using OpenAI-compatible API endpoints. Works with any
-OpenAI-compatible `/v1/completions` endpoint.
-
-**Requirements:**
-
-- An OpenAI-compatible completions endpoint
-
-**Example Configuration:**
+Single-line completion using any OpenAI-compatible `/v1/completions` endpoint.
 
 ```lua
 require("cursortab").setup({
@@ -287,11 +305,8 @@ require("cursortab").setup({
 })
 ```
 
-**Example Setup:**
-
 ```bash
-# Using llama.cpp
-llama-server -hf ggml-org/Qwen2.5-Coder-1.5B-Q8_0-GGUF --port 8000
+llama-server -hf unsloth/Qwen3.5-0.8B-GGUF:Q8_0 --port 8000
 ```
 
 </details>
@@ -301,40 +316,21 @@ llama-server -hf ggml-org/Qwen2.5-Coder-1.5B-Q8_0-GGUF --port 8000
 <details>
 <summary>Details</summary>
 
-Fill-in-the-Middle completion using standard FIM tokens. Uses both prefix
-(before cursor) and suffix (after cursor) context. Compatible with Qwen,
-DeepSeek-Coder, and similar models. Works with any OpenAI-compatible
-`/v1/completions` endpoint.
-
-**Requirements:**
-
-- An OpenAI-compatible completions endpoint with a FIM-capable model
-
-**Example Configuration:**
+Fill-in-the-Middle multi-line completion. Compatible with Qwen, DeepSeek-Coder,
+and similar FIM-capable models.
 
 ```lua
 require("cursortab").setup({
   provider = {
     type = "fim",
     url = "http://localhost:8000",
+    max_tokens = 256,
   },
 })
 ```
 
-**Example Setup:**
-
 ```bash
-# Using llama.cpp with Qwen2.5-Coder 1.5B
-llama-server -hf ggml-org/Qwen2.5-Coder-1.5B-Q8_0-GGUF --port 8000
-
-# Or with Qwen 2.5 Coder 14B + 0.5B draft for speculative decoding
-llama-server \
-    -hf ggml-org/Qwen2.5-Coder-14B-Q8_0-GGUF:q8_0 \
-    -hfd ggml-org/Qwen2.5-Coder-0.5B-Q8_0-GGUF:q8_0 \
-    --port 8012 \
-    -b 1024 \
-    -ub 1024 \
-    --cache-reuse 256
+llama-server -hf unsloth/Qwen3.5-0.8B-GGUF:Q8_0 --port 8000
 ```
 
 </details>
@@ -344,25 +340,8 @@ llama-server \
 <details>
 <summary>Details</summary>
 
-Sweep Next-Edit models for fast, accurate next-edit predictions. Sends full file
-for small files, trimmed around cursor for large files.
-
-**Available Models**:
-
-- [`sweep-next-edit-v2-7B`](https://huggingface.co/sweepai/sweep-next-edit-v2-7B)
-  — 8B params, highest quality
-- [`sweep-next-edit-1.5B`](https://huggingface.co/sweepai/sweep-next-edit-1.5B)
-  — 1B params, fast and accurate
-- [`sweep-next-edit-0.5B`](https://huggingface.co/sweepai/sweep-next-edit-0.5B)
-  — 0.5B params, lightweight
-
-**Requirements:**
-
-- vLLM or compatible inference server
-- A Sweep Next-Edit model from
-  [Hugging Face](https://huggingface.co/sweepai/models)
-
-**Example Configuration:**
+Local next-edit prediction using [Sweep models](https://huggingface.co/sweepai):
+`sweep-next-edit-v2-7B`, `sweep-next-edit-1.5B`, `sweep-next-edit-0.5B`.
 
 ```lua
 require("cursortab").setup({
@@ -373,24 +352,8 @@ require("cursortab").setup({
 })
 ```
 
-**Example Setup:**
-
 ```bash
-# Using llama.cpp
 llama-server -hf sweepai/sweep-next-edit-1.5b --port 8000
-
-# Or with a local GGUF file
-llama-server -m sweep-next-edit-1.5b.q8_0.v2.gguf --port 8000
-
-# With caching and speculative decoding
-llama-server \
-    -m sweep-next-edit-1.5b.q8_0.v2.gguf \
-    --port 8000 \
-    --cache-reuse 64 \
-    --spec-type ngram-mod \
-    --spec-ngram-size-n 24 \
-    --draft-min 12 \
-    --draft-max 64
 ```
 
 </details>
@@ -400,17 +363,10 @@ llama-server \
 <details>
 <summary>Details</summary>
 
-Sweep's hosted API for Next-Edit predictions. No local model setup required.
-
-**Requirements:**
-
-- Create an account at [sweep.dev](https://sweep.dev/) and get your API token
-- Set the `SWEEPAPI_TOKEN` environment variable with your token
-
-**Example Configuration:**
+Hosted Sweep API — no local model required. Get a token from
+[sweep.dev](https://sweep.dev/).
 
 ```bash
-# In your shell config (.bashrc, .zshrc, etc.)
 export SWEEPAPI_TOKEN="your-api-token-here"
 ```
 
@@ -425,21 +381,37 @@ require("cursortab").setup({
 
 </details>
 
-#### Zeta Provider
+#### Zeta-2 Provider
 
 <details>
 <summary>Details</summary>
 
-Zed's Zeta model - a Qwen2.5-Coder-7B fine-tuned for edit prediction using DPO
-and SFT.
+Zed's [Zeta-2](https://huggingface.co/zed-industries/zeta-2) (SeedCoder-8B). Run
+it locally with [llama.cpp](https://github.com/ggml-org/llama.cpp).
 
-**Requirements:**
+```lua
+require("cursortab").setup({
+  provider = {
+    type = "zeta-2",
+    url = "http://localhost:8000",
+    model = "zeta-2",
+  },
+})
+```
 
-- vLLM or compatible inference server
-- Zeta model downloaded from
-  [Hugging Face](https://huggingface.co/zed-industries/zeta)
+```bash
+llama-server -hf bartowski/zed-industries_zeta-2-GGUF:Q8_0 --port 8000
+```
 
-**Example Configuration:**
+</details>
+
+#### Zeta Provider (legacy)
+
+<details>
+<summary>Details</summary>
+
+Zed's original [Zeta](https://huggingface.co/zed-industries/zeta) model
+(Qwen2.5-Coder-7B). Superseded by [Zeta-2](#zeta-2-provider).
 
 ```lua
 require("cursortab").setup({
@@ -451,13 +423,8 @@ require("cursortab").setup({
 })
 ```
 
-**Example Setup:**
-
 ```bash
-# Using vLLM
-vllm serve zed-industries/zeta --served-model-name zeta --port 8000
-
-# See the HuggingFace page for optimized deployment options
+llama-server -hf bartowski/zed-industries_zeta-GGUF:Q8_0 --port 8000
 ```
 
 </details>
@@ -467,24 +434,9 @@ vllm serve zed-industries/zeta --served-model-name zeta --port 8000
 <details>
 <summary>Details</summary>
 
-GitHub Copilot completions using the official
-[copilot-language-server](https://github.com/github/copilot-language-server-release)
-LSP server, enabled with `vim.lsp.enable`. Can be installed in multiple ways:
-
-1. Install using `npm` or your OS's package manager
-2. Install with
-   [mason-lspconfig.nvim](https://github.com/mason-org/mason-lspconfig.nvim)
-3. [copilot.lua](https://github.com/zbirenbaum/copilot.lua) and
-   [copilot.vim](https://github.com/github/copilot.vim) both bundle the LSP
-   server in their plugin
-4. Sign in to Copilot: `:LspCopilotSignIn`
-
-**Requirements:**
-
-- GitHub Copilot subscription
-- `copilot-language-server` installed and enabled via `vim.lsp.enable`
-
-**Example Configuration:**
+GitHub Copilot via
+[copilot-language-server](https://github.com/github/copilot-language-server-release).
+Requires a Copilot subscription and `vim.lsp.enable`.
 
 ```lua
 require("cursortab").setup({
@@ -529,14 +481,12 @@ require("cursortab").setup({
 <details>
 <summary>Details</summary>
 
-[Mercury](https://docs.inceptionlabs.ai/) is Inception Labs' hosted Next-Edit
-prediction model.
+Hosted [Mercury](https://docs.inceptionlabs.ai/) next-edit model by Inception
+Labs.
 
-**Requirements:**
-
-- Mercury API key (set via `MERCURY_AI_TOKEN` environment variable)
-
-**Example Configuration:**
+```bash
+export MERCURY_AI_TOKEN="your-api-key-here"
+```
 
 ```lua
 require("cursortab").setup({
@@ -608,53 +558,16 @@ require("blink.cmp").setup({
 
 ## Development
 
-### Build
-
-To build the server component:
-
 ```bash
+# Build the server
 cd server && go build
-```
 
-### Test
-
-To run tests:
-
-```bash
+# Run all tests
 cd server && go test ./...
 ```
 
-To run the E2E pipeline tests (ComputeDiff → CreateStages → ToLuaFormat):
-
-```bash
-cd server && go test ./text/... -run TestE2E -v
-```
-
-To record new expected output after changes:
-
-```bash
-cd server && go test ./text/... -run TestE2E -update
-```
-
-Updated fixtures are marked as **unverified**. After reviewing the generated
-`expected.json` files and the HTML report, mark a specific fixture as verified:
-
-```bash
-cd server && go test ./text/... -run TestE2E -verify <name>
-```
-
-Verification state is tracked in `server/text/e2e/verified.json` (a SHA256
-manifest). In the HTML report, verified passing tests are collapsed while
-unverified or failing tests are shown expanded.
-
-Each fixture is a directory under `server/text/e2e/` with `old.txt`, `new.txt`,
-`params.json`, and `expected.json`. Both batch and incremental pipelines are
-verified against the same expected output. An HTML report is generated at
-`server/text/e2e/report.html`.
-
-To add a new fixture manually, create a directory with the four files and run
-with `-update` to generate the initial `expected.json`, then review and
-`-verify-case=<name>` to mark it verified.
+For E2E tests, eval harness, and detailed development instructions, see
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## FAQ
 
@@ -662,8 +575,8 @@ with `-update` to generate the initial `expected.json`, then review and
 <summary>Why are completions slow?</summary>
 
 1. Use a smaller or more heavily quantized model (e.g., Q4 instead of Q8)
-2. Decrease `provider.max_tokens` to reduce output length (also limits input
-   context)
+2. Decrease `provider.max_tokens` to reduce output length
+3. Decrease `provider.context_size` to reduce input context sent to the model
 
 The `copilot` provider is known to be slower than the rest.
 
@@ -676,7 +589,7 @@ The `copilot` provider is known to be slower than the rest.
    `:CursortabRestart`
 2. Increase `provider.completion_timeout` (default: 5000ms) to 10000 or more if
    your model is slow
-3. Increase `provider.max_tokens` to give the model more surrounding context
+3. Increase `provider.context_size` to give the model more surrounding context
    (trade-off: slower completions)
 
 </details>
@@ -705,9 +618,8 @@ will automatically restart on the next `setup()` call.
 
 ## Contributing
 
-Contributions are welcome! Please open an issue or a pull request.
-
-Feel free to open issues for bugs :)
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for build,
+test, and eval instructions.
 
 ## License
 

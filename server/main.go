@@ -26,6 +26,7 @@ type BehaviorConfig struct {
 	TextChangeDebounce  int                    `json:"text_change_debounce"`  // in milliseconds
 	MaxVisibleLines     int                    `json:"max_visible_lines"`     // max visible lines per completion (0 to disable)
 	CursorPrediction    CursorPredictionConfig `json:"cursor_prediction"`
+	DisabledIn          []string               `json:"disabled_in"`
 	CompleteInInsert    bool                   `json:"complete_in_insert"`
 	CompleteInNormal    bool                   `json:"complete_in_normal"`
 }
@@ -39,12 +40,13 @@ type FIMTokensConfig struct {
 
 // ProviderConfig holds provider-specific settings
 type ProviderConfig struct {
-	Type                 string          `json:"type"` // "inline", "fim", "sweep", "sweepapi", "zeta", "copilot", "mercuryapi", "windsurf"
+	Type                 string          `json:"type"` // "inline", "fim", "sweep", "sweepapi", "zeta-2", "zeta", "copilot", "mercuryapi", "windsurf"
 	URL                  string          `json:"url"`
 	ApiKeyEnv            string          `json:"api_key_env"` // Environment variable name for API key
 	Model                string          `json:"model"`
 	Temperature          float64         `json:"temperature"`
-	MaxTokens            int             `json:"max_tokens"` // Max tokens to generate (also drives input trimming)
+	ContextSize          int             `json:"context_size"` // Max input context size in tokens (0 = use max_tokens)
+	MaxTokens            int             `json:"max_tokens"`   // Max tokens to generate
 	TopK                 int             `json:"top_k"`
 	CompletionTimeout    int             `json:"completion_timeout"` // in milliseconds
 	MaxDiffHistoryTokens int             `json:"max_diff_history_tokens"`
@@ -82,7 +84,7 @@ func validateEnum(value, field string, valid []string) error {
 // Validate checks that the config has valid values.
 // All config must come from the Lua client - no defaults are applied here.
 func (c *Config) Validate() error {
-	if err := validateEnum(c.Provider.Type, "provider.type", []string{"inline", "fim", "sweep", "sweepapi", "zeta", "copilot", "mercuryapi", "windsurf"}); err != nil {
+	if err := validateEnum(c.Provider.Type, "provider.type", []string{"inline", "fim", "sweep", "sweepapi", "zeta-2", "zeta", "copilot", "mercuryapi", "windsurf"}); err != nil {
 		return err
 	}
 	if err := validateEnum(c.LogLevel, "log_level", []string{"trace", "debug", "info", "warn", "error"}); err != nil {
@@ -98,6 +100,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Behavior.MaxVisibleLines < 0 {
 		return fmt.Errorf("invalid behavior.max_visible_lines %d: must be >= 0", c.Behavior.MaxVisibleLines)
+	}
+	if c.Provider.ContextSize < 0 {
+		return fmt.Errorf("invalid provider.context_size %d: must be >= 0", c.Provider.ContextSize)
 	}
 	if c.Provider.MaxTokens < 0 {
 		return fmt.Errorf("invalid provider.max_tokens %d: must be >= 0", c.Provider.MaxTokens)

@@ -26,6 +26,7 @@ import (
 	"cursortab/provider/sweepapi"
 	"cursortab/provider/windsurf"
 	"cursortab/provider/zeta"
+	"cursortab/provider/zeta2"
 	"cursortab/types"
 
 	"github.com/neovim/go-client/nvim"
@@ -59,12 +60,13 @@ func NewDaemon(config Config) (*Daemon, error) {
 		APIKey:              apiKey,
 		ProviderModel:       config.Provider.Model,
 		ProviderTemperature: config.Provider.Temperature,
+		ProviderContextSize: config.Provider.ContextSize,
 		ProviderMaxTokens:   config.Provider.MaxTokens,
 		ProviderTopK:        config.Provider.TopK,
 		CompletionPath:      config.Provider.CompletionPath,
 		CompletionTimeout:   config.Provider.CompletionTimeout,
 		PrivacyMode:         config.Provider.PrivacyMode,
-		Version:             "0.7.6", // AUTO-UPDATED by release workflow
+		Version:             "0.7.7", // AUTO-UPDATED by release workflow
 		EditorVersion:       config.EditorVersion,
 		EditorOS:            config.EditorOS,
 		StateDir:            config.StateDir,
@@ -93,6 +95,8 @@ func NewDaemon(config Config) (*Daemon, error) {
 		prov = sweepapi.NewProvider(providerConfig)
 	case types.ProviderTypeZeta:
 		prov = zeta.NewProvider(providerConfig)
+	case types.ProviderTypeZeta2:
+		prov = zeta2.NewProvider(providerConfig)
 	case types.ProviderTypeCopilot:
 		prov = copilot.NewProvider(buf)
 	case types.ProviderTypeWindsurf:
@@ -107,6 +111,7 @@ func NewDaemon(config Config) (*Daemon, error) {
 	editCompletionProvider := provType == types.ProviderTypeSweep ||
 		provType == types.ProviderTypeSweepAPI ||
 		provType == types.ProviderTypeZeta ||
+		provType == types.ProviderTypeZeta2 ||
 		provType == types.ProviderTypeCopilot ||
 		provType == types.ProviderTypeMercuryAPI ||
 		provType == types.ProviderTypeWindsurf
@@ -134,6 +139,7 @@ func NewDaemon(config Config) (*Daemon, error) {
 		},
 		MaxDiffTokens:          config.Provider.MaxDiffHistoryTokens,
 		MaxVisibleLines:        config.Behavior.MaxVisibleLines,
+		DisabledIn:             config.Behavior.DisabledIn,
 		CompleteInInsert:       config.Behavior.CompleteInInsert,
 		CompleteInNormal:       config.Behavior.CompleteInNormal,
 		EditCompletionProvider: editCompletionProvider,

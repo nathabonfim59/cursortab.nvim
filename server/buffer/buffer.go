@@ -690,6 +690,27 @@ func (b *NvimBuffer) LinterErrors() *types.LinterErrors {
 	}
 }
 
+// CursorScopes returns treesitter node types from the cursor position to the root.
+func (b *NvimBuffer) CursorScopes() []string {
+	if b.client == nil {
+		return nil
+	}
+
+	var result []string
+	batch := b.client.NewBatch()
+	batch.ExecLua(
+		`return require('cursortab.treesitter').cursor_scopes(...)`,
+		&result, int(b.id), b.row, b.col,
+	)
+
+	if err := batch.Execute(); err != nil {
+		logger.Debug("error getting cursor scopes: %v", err)
+		return nil
+	}
+
+	return result
+}
+
 // TreesitterSymbols retrieves treesitter scope context around the cursor position.
 // Returns nil gracefully if no treesitter parser is available for the buffer.
 func (b *NvimBuffer) TreesitterSymbols(row, col, maxSiblings int) *types.TreesitterContext {

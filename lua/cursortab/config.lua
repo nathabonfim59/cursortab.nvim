@@ -23,6 +23,7 @@
 ---@field text_change_debounce integer
 ---@field max_visible_lines integer Max visible lines per completion (0 to disable)
 ---@field cursor_prediction CursortabCursorPredictionConfig
+---@field disabled_in string[] Tree-sitter scopes where completions are suppressed (e.g., "comment", "string")
 ---@field ignore_paths string[] Glob patterns for files to skip (gitignore-style)
 ---@field ignore_filetypes string[] Filetypes to skip completions
 ---@field ignore_gitignored boolean Skip files matched by .gitignore
@@ -39,7 +40,8 @@
 ---@field api_key_env string|nil Environment variable name containing the API key (e.g., "OPENAI_API_KEY")
 ---@field model string
 ---@field temperature number
----@field max_tokens integer Max tokens to generate (also used to derive input context size)
+---@field context_size integer Max input context size in tokens (used for input trimming; 0 = use max_tokens)
+---@field max_tokens integer Max tokens to generate
 ---@field top_k integer
 ---@field completion_timeout integer
 ---@field max_diff_history_tokens integer
@@ -106,6 +108,7 @@ local default_config = {
 			auto_advance = true, -- When completion has no changes, show cursor jump to last line
 			proximity_threshold = 2, -- Min lines apart to show cursor jump between completions (0 to disable)
 		},
+		disabled_in = {}, -- Tree-sitter scopes where completions are suppressed (e.g., "comment", "string")
 		enabled_modes = { "insert", "normal" }, -- Modes where completions are active
 		ignore_paths = { -- Glob patterns for files to skip completions
 			"*.min.js",
@@ -131,11 +134,12 @@ local default_config = {
 	},
 
 	provider = {
-		type = "inline", -- "inline", "fim", "sweep", "sweepapi", "zeta", "copilot", "mercuryapi", or "windsurf"
+type = "inline", -- "inline", "fim", "sweep", "sweepapi", "zeta-2", "zeta", "copilot", "mercuryapi", or "windsurf"
 		url = "http://localhost:8000", -- URL of the provider server
 		api_key_env = "", -- Environment variable name for API key (e.g., "OPENAI_API_KEY")
 		model = "", -- Model name
 		temperature = 0.0, -- Sampling temperature
+		context_size = 0, -- Max input context size in tokens (0 = use max_tokens)
 		max_tokens = 512, -- Max tokens to generate
 		top_k = 50, -- Top-k sampling
 		completion_timeout = 5000, -- Timeout in ms for completion requests
@@ -269,7 +273,7 @@ local function migrate_deprecated_config(user_config)
 end
 
 -- Valid values for enum-like config options
-local valid_provider_types = { inline = true, fim = true, sweep = true, sweepapi = true, zeta = true, copilot = true, mercuryapi = true, windsurf = true }
+local valid_provider_types = { inline = true, fim = true, sweep = true, sweepapi = true, ["zeta-2"] = true, zeta = true, copilot = true, mercuryapi = true, windsurf = true }
 local valid_log_levels = { trace = true, debug = true, info = true, warn = true, error = true }
 local valid_addition_styles = { dimmed = true, highlight = true }
 
@@ -282,8 +286,8 @@ local function validate_config_keys(user_cfg, default_cfg, path)
 		if default_cfg[key] == nil then
 			error(string.format("[cursortab.nvim] Unknown config option: %s%s", path, key))
 		end
-		-- Recursively validate nested tables
-		if type(value) == "table" and type(default_cfg[key]) == "table" then
+		-- Recursively validate nested tables (skip lists with numeric keys)
+		if type(value) == "table" and type(default_cfg[key]) == "table" and next(value) ~= nil and type(next(value)) ~= "number" then
 			validate_config_keys(value, default_cfg[key], path .. key .. ".")
 		end
 	end
@@ -309,7 +313,7 @@ local function validate_config(cfg)
 	if cfg.provider and cfg.provider.type then
 		if not valid_provider_types[cfg.provider.type] then
 			error(string.format(
-				"[cursortab.nvim] Invalid provider.type '%s'. Must be one of: inline, fim, sweep, sweepapi, zeta, copilot, mercuryapi, windsurf",
+"[cursortab.nvim] Invalid provider.type '%s'. Must be one of: inline, fim, sweep, sweepapi, zeta-2, zeta, copilot, mercuryapi, windsurf",
 				cfg.provider.type
 			))
 		end
@@ -393,6 +397,9 @@ local function validate_config(cfg)
 	end
 
 	if cfg.provider then
+		if cfg.provider.context_size and cfg.provider.context_size < 0 then
+			error("[cursortab.nvim] provider.context_size must be >= 0")
+		end
 		if cfg.provider.max_tokens and cfg.provider.max_tokens < 0 then
 			error("[cursortab.nvim] provider.max_tokens must be >= 0")
 		end
@@ -441,6 +448,23 @@ function config.setup(user_config)
 	local migrated = migrate_deprecated_config(user_config or {})
 	validate_config(migrated)
 	current_config = vim.tbl_deep_extend("force", vim.deepcopy(default_config), migrated)
+
+	-- Apply per-provider defaults when the user hasn't explicitly set them
+	local p = current_config.provider
+	local user_p = migrated.provider or {}
+	local provider_defaults = {
+		inline = { context_size = 1024, max_tokens = 64 },
+		fim = { context_size = 1024, max_tokens = 128 },
+	}
+	local defaults = provider_defaults[p.type]
+	if defaults then
+		for key, value in pairs(defaults) do
+			if user_p[key] == nil then
+				p[key] = value
+			end
+		end
+	end
+
 	return current_config
 end
 

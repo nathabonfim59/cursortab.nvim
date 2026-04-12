@@ -33,6 +33,8 @@ type CompletionRequest struct {
 	Version  int
 	// PreviousLines is the file content before the most recent edit
 	PreviousLines []string
+	// OriginalLines is the file content when first opened (checkpoint baseline)
+	OriginalLines []string
 	// Multi-file diff histories in the same workspace
 	FileDiffHistories []*FileDiffHistory
 	// Cursor position
@@ -219,6 +221,7 @@ const (
 	ProviderTypeSweep      ProviderType = "sweep"
 	ProviderTypeSweepAPI   ProviderType = "sweepapi"
 	ProviderTypeZeta       ProviderType = "zeta"
+	ProviderTypeZeta2      ProviderType = "zeta-2"
 	ProviderTypeCopilot    ProviderType = "copilot"
 	ProviderTypeMercuryAPI ProviderType = "mercuryapi"
 	ProviderTypeWindsurf   ProviderType = "windsurf"
@@ -237,7 +240,8 @@ type ProviderConfig struct {
 	APIKey              string         // Resolved API key for authenticated requests
 	ProviderModel       string         // Model name
 	ProviderTemperature float64        // Sampling temperature
-	ProviderMaxTokens   int            // Max tokens to generate (also drives input trimming)
+	ProviderContextSize int            // Max input context size in tokens (0 = use ProviderMaxTokens)
+	ProviderMaxTokens   int            // Max tokens to generate
 	ProviderTopK        int            // Top-k sampling (used by some providers)
 	CompletionPath      string         // API endpoint path (e.g., "/v1/completions")
 	FIMTokens           FIMTokenConfig // FIM tokens configuration

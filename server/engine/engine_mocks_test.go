@@ -177,6 +177,8 @@ func (b *mockBuffer) IsModified() bool {
 	return true // Default to modified so completions aren't suppressed in tests
 }
 
+func (b *mockBuffer) CursorScopes() []string { return nil }
+
 func (b *mockBuffer) SkipHistory() bool {
 	return false
 }

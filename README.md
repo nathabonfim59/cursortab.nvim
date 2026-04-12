@@ -34,6 +34,7 @@ A Neovim plugin that provides local edit completions and cursor predictions.
     * [Sweep API Provider](#sweep-api-provider)
     * [Zeta Provider](#zeta-provider)
     * [Copilot Provider](#copilot-provider)
+    * [Windsurf Provider](#windsurf-provider)
     * [Mercury API Provider](#mercury-api-provider)
   * [blink.cmp Integration](#blinkcmp-integration)
 * [Usage](#usage)
@@ -183,7 +184,7 @@ require("cursortab").setup({
   },
 
   provider = {
-    type = "inline",                      -- Provider: "inline", "fim", "sweep", "sweepapi", "zeta", "copilot", or "mercuryapi"
+    type = "inline",                      -- Provider: "inline", "fim", "sweep", "sweepapi", "zeta", "copilot", "windsurf", or "mercuryapi"
     url = "http://localhost:8000",        -- URL of the provider server
     api_key_env = "",                     -- Env var name for API key (e.g., "OPENAI_API_KEY")
     model = "",                           -- Model name
@@ -236,8 +237,8 @@ vim.api.nvim_set_hl(0, "CursorTabAddition", { bg = "#1a3a1a" })
 
 ### Providers
 
-The plugin supports seven AI provider backends: Inline, FIM, Sweep, Sweep API,
-Zeta, Copilot, and Mercury API.
+The plugin supports eight AI provider backends: Inline, FIM, Sweep, Sweep API,
+Zeta, Copilot, Windsurf, and Mercury API.
 
 | Provider     | Hosted | Multi-line | Multi-edit | Cursor Prediction | Streaming | Model                  |
 | ------------ | :----: | :--------: | :--------: | :---------------: | :-------: | ---------------------- |
@@ -247,20 +248,21 @@ Zeta, Copilot, and Mercury API.
 | `sweepapi`   |   ✓    |     ✓      |     ✓      |         ✓         |     ✓     | `sweep-next-edit-7b`   |
 | `zeta`       |        |     ✓      |     ✓      |         ✓         |     ✓     | `zeta`                 |
 | `copilot`    |   ✓    |     ✓      |     ✓      |         ✓         |           | GitHub Copilot         |
+| `windsurf`   |   ✓    |     ✓      |     ✓      |         ✓         |           | Codeium                |
 | `mercuryapi` |   ✓    |     ✓      |     ✓      |         ✓         |           | `mercury-edit`         |
 
 **Context Per Provider:**
 
-| Context             | inline | fim | sweep | zeta | sweepapi | copilot | mercuryapi |
-| ------------------- | :----: | :-: | :---: | :--: | :------: | :-----: | :--------: |
-| Buffer content      |   ✓    |  ✓  |   ✓   |  ✓   |    ✓     |         |     ✓      |
-| Edit history        |        |     |   ✓   |  ✓   |    ✓     |         |     ✓      |
-| Previous file state |        |     |   ✓   |      |    ✓     |         |            |
-| LSP diagnostics     |        |     |       |  ✓   |    ✓     |         |     ✓      |
-| Treesitter context  |        |     |   ✓   |  ✓   |    ✓     |         |     ✓      |
-| Git diff context    |        |     |   ✓   |  ✓   |    ✓     |         |     ✓      |
-| Recent files        |        |     |       |      |    ✓     |         |     ✓      |
-| User actions        |        |     |       |      |    ✓     |         |            |
+| Context             | inline | fim | sweep | zeta | sweepapi | copilot | windsurf | mercuryapi |
+| ------------------- | :----: | :-: | :---: | :--: | :------: | :-----: | :------: | :--------: |
+| Buffer content      |   ✓    |  ✓  |   ✓   |  ✓   |    ✓     |         |    ✓     |     ✓      |
+| Edit history        |        |     |   ✓   |  ✓   |    ✓     |         |          |     ✓      |
+| Previous file state |        |     |   ✓   |      |    ✓     |         |          |            |
+| LSP diagnostics     |        |     |       |  ✓   |    ✓     |         |          |     ✓      |
+| Treesitter context  |        |     |   ✓   |  ✓   |    ✓     |         |          |     ✓      |
+| Git diff context    |        |     |   ✓   |  ✓   |    ✓     |         |          |     ✓      |
+| Recent files        |        |     |       |      |    ✓     |         |          |     ✓      |
+| User actions        |        |     |       |      |    ✓     |         |          |            |
 
 #### Inline Provider (Default)
 
@@ -488,6 +490,34 @@ LSP server, enabled with `vim.lsp.enable`. Can be installed in multiple ways:
 require("cursortab").setup({
   provider = {
     type = "copilot",
+  },
+})
+```
+
+</details>
+
+#### Windsurf Provider
+
+<details>
+<summary>Details</summary>
+
+Windsurf (Codeium) completions using the local language server bundled by the
+[windsurf.nvim](https://github.com/Exafunction/windsurf.nvim) plugin. The
+provider discovers the server's port and API key automatically via the plugin's
+internal state — no manual URL or key configuration needed.
+
+**Requirements:**
+
+- Install [windsurf.nvim](https://github.com/Exafunction/windsurf.nvim) and
+  authenticate with Codeium (`:Codeium Auth`)
+- A Windsurf account
+
+**Example Configuration:**
+
+```lua
+require("cursortab").setup({
+  provider = {
+    type = "windsurf",
   },
 })
 ```

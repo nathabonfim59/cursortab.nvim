@@ -112,10 +112,10 @@ local GPU needed):
    ```
 
 If you prefer **local next-edit prediction**, use the `zeta-2` provider with
-[vLLM](https://github.com/vllm-project/vllm):
+[llama.cpp](https://github.com/ggml-org/llama.cpp):
 
 ```bash
-vllm serve zed-industries/zeta-2 --served-model-name zeta-2 --port 8000
+llama-server -hf bartowski/zed-industries_zeta-2-GGUF:Q8_0 --port 8000
 ```
 
 ```lua
@@ -132,7 +132,7 @@ If you want the **fastest local setup**, use the `fim` or `inline` provider with
 [llama.cpp](https://github.com/ggml-org/llama.cpp):
 
 ```bash
-llama-server -hf unsloth/Qwen3.5-0.8B-GGUF --port 8000
+llama-server -hf unsloth/Qwen3.5-0.8B-GGUF:Q8_0 --port 8000
 ```
 
 See [Providers](#providers) for all available options.
@@ -410,7 +410,7 @@ require("cursortab").setup({
 <summary>Details</summary>
 
 Zed's [Zeta-2](https://huggingface.co/zed-industries/zeta-2) (SeedCoder-8B).
-Requires vLLM or compatible inference server.
+Run it locally with [llama.cpp](https://github.com/ggml-org/llama.cpp).
 
 ```lua
 require("cursortab").setup({
@@ -423,7 +423,7 @@ require("cursortab").setup({
 ```
 
 ```bash
-vllm serve zed-industries/zeta-2 --served-model-name zeta-2 --port 8000
+llama-server -hf bartowski/zed-industries_zeta-2-GGUF:Q8_0 --port 8000
 ```
 
 </details>
@@ -447,7 +447,7 @@ require("cursortab").setup({
 ```
 
 ```bash
-vllm serve zed-industries/zeta --served-model-name zeta --port 8000
+llama-server -hf bartowski/zed-industries_zeta-GGUF:Q8_0 --port 8000
 ```
 
 </details>

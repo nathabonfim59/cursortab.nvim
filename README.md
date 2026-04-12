@@ -22,9 +22,11 @@ A Neovim plugin that provides local edit completions and cursor predictions.
 
 * [Requirements](#requirements)
 * [Installation](#installation)
+  * [Mercury API (hosted, no local GPU needed)](#mercury-api-hosted-no-local-gpu-needed)
+  * [Zeta-2 (local next-edit prediction)](#zeta-2-local-next-edit-prediction)
+  * [Qwen3.5-0.8B (fastest local)](#qwen35-08b-fastest-local)
   * [Using lazy.nvim](#using-lazynvim)
   * [Using packer.nvim](#using-packernvim)
-* [Quick Start](#quick-start)
 * [Configuration](#configuration)
   * [Highlight Groups](#highlight-groups)
   * [Providers](#providers)
@@ -54,6 +56,41 @@ A Neovim plugin that provides local edit completions and cursor predictions.
 
 ## Installation
 
+Recommended starting points:
+
+- **Best hosted:** Mercury API
+- **Best local next-edit:** Zeta-2
+- **Fastest local:** Qwen3.5-0.8B with the `fim` or `inline` provider, or Sweep
+  1.5B/0.5B with the `sweep` provider
+
+Pick a provider below, then use the matching `setup()` call in your plugin
+config. See [Providers](#providers) for all available options.
+
+### Mercury API (hosted, no local GPU needed)
+
+1. Get an API key from [Inception Labs](https://docs.inceptionlabs.ai/)
+2. Set the environment variable:
+
+   ```bash
+   export MERCURY_AI_TOKEN="your-api-key-here"
+   ```
+
+### Zeta-2 (local next-edit prediction)
+
+Run [llama.cpp](https://github.com/ggml-org/llama.cpp):
+
+```bash
+llama-server -hf bartowski/zed-industries_zeta-2-GGUF:Q8_0 --port 8000
+```
+
+### Qwen3.5-0.8B (fastest local)
+
+Run [llama.cpp](https://github.com/ggml-org/llama.cpp):
+
+```bash
+llama-server -hf unsloth/Qwen3.5-0.8B-GGUF:Q8_0 --port 8000
+```
+
 ### Using [lazy.nvim](https://github.com/folke/lazy.nvim)
 
 ```lua
@@ -63,7 +100,22 @@ A Neovim plugin that provides local edit completions and cursor predictions.
   lazy = false,      -- The server is already lazy loaded
   build = "cd server && go build",
   config = function()
-    require("cursortab").setup()
+    require("cursortab").setup({
+      provider = {
+        -- Mercury API (hosted)
+        type = "mercuryapi",
+        api_key_env = "MERCURY_AI_TOKEN",
+
+        -- Zeta-2 (local)
+        -- type = "zeta-2",
+        -- url = "http://localhost:8000",
+        -- model = "zeta-2",
+
+        -- Qwen3.5-0.8B (fastest local, use "fim" or "inline")
+        -- type = "fim",
+        -- url = "http://localhost:8000",
+      },
+    })
   end,
 }
 ```
@@ -76,66 +128,15 @@ use {
   -- tag = "*",  -- Use latest tagged version for more stability
   run = "cd server && go build",
   config = function()
-    require("cursortab").setup()
+    require("cursortab").setup({
+      provider = {
+        type = "mercuryapi",
+        api_key_env = "MERCURY_AI_TOKEN",
+      },
+    })
   end
 }
 ```
-
-## Quick Start
-
-Recommended starting points:
-
-- **Best hosted:** Mercury API
-- **Best local next-edit:** Zeta-2
-- **Fastest local:** Qwen3.5-0.8B with the `fim` or `inline` provider, or Sweep
-  1.5B/0.5B with the `sweep` provider
-
-The fastest way to get started is with the **Mercury API** provider (hosted, no
-local GPU needed):
-
-1. Get an API key from [Inception Labs](https://docs.inceptionlabs.ai/)
-2. Set the environment variable:
-
-   ```bash
-   export MERCURY_AI_TOKEN="your-api-key-here"
-   ```
-
-3. Add the provider to your setup:
-
-   ```lua
-   require("cursortab").setup({
-     provider = {
-       type = "mercuryapi",
-       api_key_env = "MERCURY_AI_TOKEN",
-     },
-   })
-   ```
-
-If you prefer **local next-edit prediction**, use the `zeta-2` provider with
-[llama.cpp](https://github.com/ggml-org/llama.cpp):
-
-```bash
-llama-server -hf bartowski/zed-industries_zeta-2-GGUF:Q8_0 --port 8000
-```
-
-```lua
-require("cursortab").setup({
-  provider = {
-    type = "zeta-2",
-    url = "http://localhost:8000",
-    model = "zeta-2",
-  },
-})
-```
-
-If you want the **fastest local setup**, use the `fim` or `inline` provider with
-[llama.cpp](https://github.com/ggml-org/llama.cpp):
-
-```bash
-llama-server -hf unsloth/Qwen3.5-0.8B-GGUF:Q8_0 --port 8000
-```
-
-See [Providers](#providers) for all available options.
 
 ## Configuration
 
@@ -411,8 +412,8 @@ require("cursortab").setup({
 <details>
 <summary>Details</summary>
 
-Zed's [Zeta-2](https://huggingface.co/zed-industries/zeta-2) (SeedCoder-8B).
-Run it locally with [llama.cpp](https://github.com/ggml-org/llama.cpp).
+Zed's [Zeta-2](https://huggingface.co/zed-industries/zeta-2) (SeedCoder-8B). Run
+it locally with [llama.cpp](https://github.com/ggml-org/llama.cpp).
 
 ```lua
 require("cursortab").setup({

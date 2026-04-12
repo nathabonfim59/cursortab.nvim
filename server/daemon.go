@@ -24,6 +24,7 @@ import (
 	"cursortab/provider/mercuryapi"
 	"cursortab/provider/sweep"
 	"cursortab/provider/sweepapi"
+	"cursortab/provider/windsurf"
 	"cursortab/provider/zeta"
 	"cursortab/types"
 
@@ -94,6 +95,8 @@ func NewDaemon(config Config) (*Daemon, error) {
 		prov = zeta.NewProvider(providerConfig)
 	case types.ProviderTypeCopilot:
 		prov = copilot.NewProvider(buf)
+	case types.ProviderTypeWindsurf:
+		prov = windsurf.NewProvider(buf)
 	case types.ProviderTypeMercuryAPI:
 		prov = mercuryapi.NewProvider(providerConfig)
 	default:
@@ -105,7 +108,8 @@ func NewDaemon(config Config) (*Daemon, error) {
 		provType == types.ProviderTypeSweepAPI ||
 		provType == types.ProviderTypeZeta ||
 		provType == types.ProviderTypeCopilot ||
-		provType == types.ProviderTypeMercuryAPI
+		provType == types.ProviderTypeMercuryAPI ||
+		provType == types.ProviderTypeWindsurf
 
 	// Initialize dataset sender if user opted in to contribute data
 	var datasetSender metrics.Sender

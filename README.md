@@ -60,8 +60,8 @@ Recommended starting points:
 
 - **Best hosted:** Mercury API
 - **Best local next-edit:** Zeta-2
-- **Fastest local:** Qwen3.5-0.8B with the `fim` or `inline` provider, or Sweep
-  1.5B/0.5B with the `sweep` provider
+- **Fastest local:** Qwen3.5-0.8B with the `inline` provider, or Sweep 1.5B/0.5B
+  with the `sweep` provider
 
 Pick a provider below, then use the matching `setup()` call in your plugin
 config. See [Providers](#providers) for all available options.
@@ -111,8 +111,7 @@ llama-server -hf unsloth/Qwen3.5-0.8B-GGUF:Q8_0 --port 8000
         -- url = "http://localhost:8000",
         -- model = "zeta-2",
 
-        -- Qwen3.5-0.8B (fastest local, use "fim" or "inline")
-        -- type = "fim",
+        -- Qwen3.5-0.8B (fastest local, default to "inline")
         -- url = "http://localhost:8000",
       },
     })
@@ -349,6 +348,9 @@ llama-server -hf unsloth/Qwen3.5-0.8B-GGUF:Q8_0 --port 8000
 
 Fill-in-the-Middle multi-line completion. Compatible with Qwen, DeepSeek-Coder,
 and similar FIM-capable models.
+
+From experimentation, FIM models need to be >7B models to have consistent
+results.
 
 ```lua
 require("cursortab").setup({

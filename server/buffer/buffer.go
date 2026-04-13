@@ -574,17 +574,16 @@ func (b *NvimBuffer) InsertLine(line int, content string, keepUI bool) error {
 	return cursorBatch.Execute()
 }
 
-// LinterErrors retrieves Neovim diagnostics for the current buffer and returns them in provider format
-func (b *NvimBuffer) LinterErrors() *types.LinterErrors {
+// Diagnostics retrieves LSP diagnostics for the current buffer.
+// Returns raw Neovim diagnostic data; providers handle formatting.
+func (b *NvimBuffer) Diagnostics() *types.Diagnostics {
 	if b.client == nil {
 		return nil
 	}
 
-	// First check if LSP is available for this buffer
 	batch := b.client.NewBatch()
 	var hasLsp bool
 
-	// Check if there are any active LSP clients attached to this buffer
 	batch.ExecLua(fmt.Sprintf(`
 		local clients = vim.lsp.get_clients and vim.lsp.get_clients({bufnr = %d}) or vim.lsp.get_active_clients({bufnr = %d})
 		return #clients > 0
@@ -595,83 +594,45 @@ func (b *NvimBuffer) LinterErrors() *types.LinterErrors {
 		return nil
 	}
 
-	// If no LSP is available, return nil
 	if !hasLsp {
 		return nil
 	}
 
-	// Use batch API to get diagnostics for the current buffer
 	batch = b.client.NewBatch()
+	var rawDiags []map[string]any
 
-	var diagnostics []map[string]any
-	var bufferContents [][]byte
-
-	// Get diagnostics using vim.diagnostic.get() for this specific buffer
 	batch.ExecLua(fmt.Sprintf(`
-		local diagnostics = vim.diagnostic.get(%d)
-		return diagnostics
-	`, int(b.id)), &diagnostics, nil)
-
-	// Get buffer contents for the linter errors
-	batch.BufferLines(b.id, 0, -1, false, &bufferContents)
+		return vim.diagnostic.get(%d)
+	`, int(b.id)), &rawDiags, nil)
 
 	if err := batch.Execute(); err != nil {
-		logger.Error("error getting linter errors: %v", err)
+		logger.Error("error getting diagnostics: %v", err)
 		return nil
 	}
 
-	if len(diagnostics) == 0 {
+	if len(rawDiags) == 0 {
 		return nil
 	}
 
-	// Convert buffer contents to string
-	contentLines := make([]string, len(bufferContents))
-	for i, line := range bufferContents {
-		contentLines[i] = string(line)
-	}
-	fileContents := strings.Join(contentLines, "\n")
-
-	// Convert Neovim diagnostics to types.LinterError format
-	providerErrors := make([]*types.LinterError, 0, len(diagnostics))
-
-	for _, diag := range diagnostics {
-		linterError := &types.LinterError{
-			Message: getString(diag, "message"),
-			Source:  getString(diag, "source"),
+	items := make([]*types.Diagnostic, 0, len(rawDiags))
+	for _, diag := range rawDiags {
+		d := &types.Diagnostic{
+			Message:  getString(diag, "message"),
+			Source:   getString(diag, "source"),
+			Severity: types.DiagnosticSeverity(max(1, getNumber(diag, "severity"))),
 		}
 
-		// Convert severity
-		if severity, ok := diag["severity"].(float64); ok {
-			switch int(severity) {
-			case 1:
-				linterError.Severity = "DIAGNOSTIC_SEVERITY_ERROR"
-			case 2:
-				linterError.Severity = "DIAGNOSTIC_SEVERITY_WARNING"
-			case 3:
-				linterError.Severity = "DIAGNOSTIC_SEVERITY_INFORMATION"
-			case 4:
-				linterError.Severity = "DIAGNOSTIC_SEVERITY_HINT"
-			default:
-				linterError.Severity = "DIAGNOSTIC_SEVERITY_ERROR"
-			}
-		} else {
-			linterError.Severity = "DIAGNOSTIC_SEVERITY_ERROR"
-		}
-
-		// Convert range information
 		if lnum := getNumber(diag, "lnum"); lnum != -1 {
 			if col := getNumber(diag, "col"); col != -1 {
 				endLnum := lnum
 				endCol := col
-
-				if endL := getNumber(diag, "end_lnum"); endL != -1 {
-					endLnum = endL
+				if v := getNumber(diag, "end_lnum"); v != -1 {
+					endLnum = v
 				}
-				if endC := getNumber(diag, "end_col"); endC != -1 {
-					endCol = endC
+				if v := getNumber(diag, "end_col"); v != -1 {
+					endCol = v
 				}
-
-				linterError.Range = &types.CursorRange{
+				d.Range = &types.CursorRange{
 					StartLine:      lnum,
 					StartCharacter: col,
 					EndLine:        endLnum,
@@ -680,13 +641,12 @@ func (b *NvimBuffer) LinterErrors() *types.LinterErrors {
 			}
 		}
 
-		providerErrors = append(providerErrors, linterError)
+		items = append(items, d)
 	}
 
-	return &types.LinterErrors{
-		RelativeWorkspacePath: b.path,
-		Errors:                providerErrors,
-		FileContents:          fileContents,
+	return &types.Diagnostics{
+		FilePath: b.path,
+		Items:    items,
 	}
 }
 

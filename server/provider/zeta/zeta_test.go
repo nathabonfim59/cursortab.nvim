@@ -74,11 +74,11 @@ func TestFormatDiagnosticsForPrompt_Empty(t *testing.T) {
 func TestFormatDiagnosticsForPrompt_WithErrors(t *testing.T) {
 	req := &types.CompletionRequest{
 		AdditionalContext: &types.ContextResult{
-			Diagnostics: &types.LinterErrors{
-				RelativeWorkspacePath: "src/main.go",
-				Errors: []*types.LinterError{
+			Diagnostics: &types.Diagnostics{
+				FilePath: "src/main.go",
+				Items: []*types.Diagnostic{
 					{
-						Severity: "error",
+						Severity: types.SeverityError,
 						Message:  "undefined: foo",
 						Source:   "gopls",
 						Range: &types.CursorRange{
@@ -94,7 +94,7 @@ func TestFormatDiagnosticsForPrompt_WithErrors(t *testing.T) {
 
 	assert.True(t, strings.Contains(result, "src/main.go"), "should have file path")
 	assert.True(t, strings.Contains(result, "line 10"), "should have line number")
-	assert.True(t, strings.Contains(result, "[error]"), "should have severity")
+	assert.True(t, strings.Contains(result, "[ERROR]"), "should have severity")
 	assert.True(t, strings.Contains(result, "undefined: foo"), "should have message")
 	assert.True(t, strings.Contains(result, "(source: gopls)"), "should have source")
 }

@@ -593,7 +593,7 @@ func (e *Engine) sendMetric(eventType metrics.EventType) {
 		case result := <-e.contextResultCh:
 			if result != nil {
 				if result.Diagnostics != nil {
-					e.currentSnapshot.HasDiagnostics = len(result.Diagnostics.Errors) > 0
+					e.currentSnapshot.HasDiagnostics = len(result.Diagnostics.Items) > 0
 				}
 				if result.Treesitter != nil {
 					e.currentSnapshot.TreesitterScope = classifyScope(result.Treesitter.EnclosingSignature)

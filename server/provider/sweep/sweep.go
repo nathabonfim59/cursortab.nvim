@@ -14,6 +14,10 @@
 //	Sibling: func otherFunc() {
 //	Import: import "net/http"
 //
+//	<|file_sep|>context/diagnostics       (omitted if no LSP diagnostics)
+//	Line 10: [gopls] undefined: foo
+//	Line 15: [gopls] unused variable: bar
+//
 //	<|file_sep|>{file_path}.diff          (diff history, if any)
 //	original:
 //	{old_code}
@@ -40,6 +44,7 @@ package sweep
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"cursortab/client/openai"
@@ -122,6 +127,11 @@ func buildPrompt(p *provider.Provider, ctx *provider.Context) *openai.Completion
 	// Treesitter context
 	if ts := formatTreesitterSection(req); ts != "" {
 		promptBuilder.WriteString(ts)
+	}
+
+	// Diagnostics context
+	if ds := formatDiagnosticsSection(req); ds != "" {
+		promptBuilder.WriteString(ds)
 	}
 
 	// Diff history section (recent_changes)
@@ -294,6 +304,33 @@ func formatTreesitterSection(req *types.CompletionRequest) string {
 
 	for _, imp := range ts.Imports {
 		fmt.Fprintf(&b, "Import: %s\n", imp)
+	}
+
+	return b.String()
+}
+
+func formatDiagnosticsSection(req *types.CompletionRequest) string {
+	diag := req.GetDiagnostics()
+	if diag == nil || len(diag.Items) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("<|file_sep|>context/diagnostics\n")
+
+	for _, err := range diag.Items {
+		if err.Range != nil {
+			b.WriteString("Line ")
+			b.WriteString(strconv.Itoa(err.Range.StartLine))
+			b.WriteString(": ")
+		}
+		if err.Source != "" {
+			b.WriteString("[")
+			b.WriteString(err.Source)
+			b.WriteString("] ")
+		}
+		b.WriteString(err.Message)
+		b.WriteString("\n")
 	}
 
 	return b.String()

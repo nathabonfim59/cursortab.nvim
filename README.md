@@ -280,7 +280,7 @@ Zeta-2, Zeta (legacy), Copilot, and Mercury API.
 | Buffer content      |   ✓    |  ✓  |   ✓   |   ✓    |  ✓   |    ✓     |         |     ✓      |
 | Edit history        |        |     |   ✓   |   ✓    |  ✓   |    ✓     |         |     ✓      |
 | Previous file state |        |     |   ✓   |        |      |    ✓     |         |            |
-| LSP diagnostics     |        |     |       |   ✓    |  ✓   |    ✓     |         |     ✓      |
+| LSP diagnostics     |        |     |   ✓   |   ✓    |  ✓   |    ✓     |         |     ✓      |
 | Treesitter context  |        |     |   ✓   |   ✓    |  ✓   |    ✓     |         |     ✓      |
 | Git diff context    |        |     |   ✓   |   ✓    |  ✓   |    ✓     |         |     ✓      |
 | Recent files        |        |     |   ✓   |   ✓    |  ✓   |    ✓     |         |     ✓      |

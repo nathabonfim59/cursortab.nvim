@@ -13,9 +13,9 @@ type diagnostics struct {
 }
 
 func (d *diagnostics) Gather(_ context.Context, _ *SourceRequest) *types.ContextResult {
-	errs := d.buffer.LinterErrors()
-	if errs == nil {
+	diags := d.buffer.Diagnostics()
+	if diags == nil {
 		return nil
 	}
-	return &types.ContextResult{Diagnostics: errs}
+	return &types.ContextResult{Diagnostics: diags}
 }

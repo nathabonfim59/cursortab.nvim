@@ -368,23 +368,12 @@ func writeRecentFilesPseudoFiles(b *strings.Builder, snapshots []*types.RecentBu
 // our sweepapi and mercuryapi providers do the same thing with similar
 // pseudo-file tricks, and the format is self-explanatory enough that the
 // SeedCoder fine-tune should parse it even without seeing it in training.
-func writeDiagnosticsPseudoFile(b *strings.Builder, diag *types.LinterErrors) {
-	if diag == nil || len(diag.Errors) == 0 {
+func writeDiagnosticsPseudoFile(b *strings.Builder, diag *types.Diagnostics) {
+	text := provider.FormatDiagnosticsText(diag)
+	if text == "" {
 		return
 	}
-
-	var content strings.Builder
-	for _, err := range diag.Errors {
-		if err.Range != nil {
-			fmt.Fprintf(&content, "line %d: ", err.Range.StartLine)
-		}
-		fmt.Fprintf(&content, "[%s] %s", err.Severity, err.Message)
-		if err.Source != "" {
-			fmt.Fprintf(&content, " (source: %s)", err.Source)
-		}
-		content.WriteString("\n")
-	}
-	writePseudoFile(b, "diagnostics", content.String())
+	writePseudoFile(b, "diagnostics", text)
 }
 
 // writeTreesitterPseudoFile renders enclosing scope + sibling symbols + imports

@@ -18,19 +18,21 @@ import (
 
 // AutocompleteRequest is the request format for the Sweep API
 type AutocompleteRequest struct {
-	RepoName             string       `json:"repo_name"`
-	FilePath             string       `json:"file_path"`
-	FileContents         string       `json:"file_contents"`
-	OriginalFileContents string       `json:"original_file_contents"`
-	CursorPosition       int          `json:"cursor_position"`
-	RecentChanges        string       `json:"recent_changes"`
-	ChangesAboveCursor   bool         `json:"changes_above_cursor"`
-	MultipleSuggestions  bool         `json:"multiple_suggestions"`
-	UseBytes             bool         `json:"use_bytes"`
-	PrivacyModeEnabled   bool         `json:"privacy_mode_enabled"`
-	FileChunks           []FileChunk  `json:"file_chunks"`
-	RecentUserActions    []UserAction `json:"recent_user_actions"`
-	RetrievalChunks      []FileChunk  `json:"retrieval_chunks"`
+	RepoName             string             `json:"repo_name"`
+	FilePath             string             `json:"file_path"`
+	FileContents         string             `json:"file_contents"`
+	OriginalFileContents string             `json:"original_file_contents"`
+	CursorPosition       int                `json:"cursor_position"`
+	RecentChanges        string             `json:"recent_changes"`
+	RecentChangesHighRes string             `json:"recent_changes_high_res"`
+	ChangesAboveCursor   bool               `json:"changes_above_cursor"`
+	MultipleSuggestions  bool               `json:"multiple_suggestions"`
+	UseBytes             bool               `json:"use_bytes"`
+	PrivacyModeEnabled   bool               `json:"privacy_mode_enabled"`
+	FileChunks           []FileChunk        `json:"file_chunks"`
+	RecentUserActions    []UserAction       `json:"recent_user_actions"`
+	RetrievalChunks      []FileChunk        `json:"retrieval_chunks"`
+	EditorDiagnostics    []EditorDiagnostic `json:"editor_diagnostics,omitempty"`
 }
 
 // FileChunk represents a chunk of file content
@@ -49,6 +51,17 @@ type UserAction struct {
 	LineNumber int    `json:"line_number"` // 1-indexed
 	Offset     int    `json:"offset"`      // Byte offset in file
 	Timestamp  int64  `json:"timestamp"`   // Unix epoch milliseconds
+}
+
+// EditorDiagnostic represents a single LSP diagnostic sent alongside the request.
+// Matches the JetBrains plugin's EditorDiagnostic format.
+type EditorDiagnostic struct {
+	Line      int    `json:"line"`         // 1-indexed line number
+	StartOff  int    `json:"start_offset"` // Character offset of diagnostic start
+	EndOff    int    `json:"end_offset"`   // Character offset of diagnostic end
+	Severity  string `json:"severity"`     // e.g. "ERROR", "WARNING"
+	Message   string `json:"message"`      // Diagnostic message
+	Timestamp int64  `json:"timestamp"`    // Unix epoch milliseconds when first seen
 }
 
 // AutocompleteResponse is the response format from the Sweep API
@@ -99,11 +112,14 @@ type MetricsRequest struct {
 
 // Client is the HTTP client for the Sweep API
 type Client struct {
-	HTTPClient *http.Client
-	URL        string
-	metricsURL string
-	AuthToken  string
-	UserAgent  string
+	HTTPClient    *http.Client
+	URL           string
+	metricsURL    string
+	AuthToken     string
+	UserAgent     string
+	PluginVersion string // e.g. "0.1.0"
+	IDEName       string // e.g. "Neovim"
+	IDEVersion    string // e.g. "0.10.0"
 }
 
 // NewClient creates a new Sweep API client.
@@ -177,6 +193,15 @@ func (c *Client) DoCompletion(ctx context.Context, req *AutocompleteRequest) ([]
 	}
 	if c.AuthToken != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+c.AuthToken)
+	}
+	if c.PluginVersion != "" {
+		httpReq.Header.Set("X-Plugin-Version", c.PluginVersion)
+	}
+	if c.IDEName != "" {
+		httpReq.Header.Set("X-IDE-Name", c.IDEName)
+	}
+	if c.IDEVersion != "" {
+		httpReq.Header.Set("X-IDE-Version", c.IDEVersion)
 	}
 
 	// Send request

@@ -33,6 +33,8 @@
 ---@field prefix string FIM prefix token (e.g., "<|fim_prefix|>")
 ---@field suffix string FIM suffix token (e.g., "<|fim_suffix|>")
 ---@field middle string FIM middle token (e.g., "<|fim_middle|>")
+---@field repo_name string Optional repo-level FIM token (e.g., "<|repo_name|>"); enables cross-file context
+---@field file_sep string Optional file separator token (e.g., "<|file_sep|>"); enables cross-file context
 
 ---@class CursortabProviderConfig
 ---@field type string
@@ -149,6 +151,8 @@ local default_config = {
 			prefix = "<|fim_prefix|>",
 			suffix = "<|fim_suffix|>",
 			middle = "<|fim_middle|>",
+			repo_name = "", -- Optional: "<|repo_name|>" enables repo-level cross-file context
+			file_sep = "", -- Optional: "<|file_sep|>" enables repo-level cross-file context
 		},
 		privacy_mode = true, -- Don't send telemetry to provider
 	},
@@ -426,6 +430,16 @@ local function validate_config(cfg)
 					))
 				end
 			end
+			local optional_fields = { "repo_name", "file_sep" }
+			for _, field in ipairs(optional_fields) do
+				local value = cfg.provider.fim_tokens[field]
+				if value ~= nil and type(value) ~= "string" then
+					error(string.format(
+						"[cursortab.nvim] provider.fim_tokens.%s must be a string",
+						field
+					))
+				end
+			end
 		end
 	end
 end
@@ -462,6 +476,17 @@ function config.setup(user_config)
 			if user_p[key] == nil then
 				p[key] = value
 			end
+		end
+	end
+
+	-- Auto-detect repo-level FIM tokens from model name when not explicitly set
+	local user_fim = (user_p.fim_tokens or {})
+	if user_fim.repo_name == nil and user_fim.file_sep == nil then
+		local model_lower = (p.model or ""):lower()
+		-- Qwen family (Qwen2.5-Coder, Qwen3.5) and Zeta (Qwen2.5-Coder based)
+		if model_lower:match("qwen") or (p.type == "zeta") then
+			p.fim_tokens.repo_name = "<|repo_name|>"
+			p.fim_tokens.file_sep = "<|file_sep|>"
 		end
 	end
 

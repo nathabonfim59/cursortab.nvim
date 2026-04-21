@@ -211,6 +211,9 @@ type Provider struct {
 func NewProvider(config *types.ProviderConfig) *Provider {
 	client := sweepapi.NewClient(config.ProviderURL, config.APIKey, config.CompletionTimeout)
 	client.UserAgent = fmt.Sprintf("Neovim v%s - OS: %s - cursortab.nvim v%s", config.EditorVersion, config.EditorOS, config.Version)
+	client.PluginVersion = config.Version
+	client.IDEName = "Neovim"
+	client.IDEVersion = config.EditorVersion
 
 	return &Provider{
 		config: config,
@@ -284,10 +287,16 @@ func (c *streamContext) GetTrimmedLines() []string { return c.trimmedLines }
 // GetStreamingType implements engine.LineStreamProvider
 func (p *Provider) GetStreamingType() int { return engine.StreamingTypeLines }
 
-// PrepareLineStream implements engine.LineStreamProvider
-func (p *Provider) PrepareLineStream(ctx context.Context, req *types.CompletionRequest) (engine.LineStream, any, error) {
-	defer logger.Trace("sweepapi.PrepareLineStream")()
+// preparedRequest holds the result of buildRequest for use by both
+// PrepareLineStream and GetCompletion.
+type preparedRequest struct {
+	apiReq       *sweepapi.AutocompleteRequest
+	fileContents string
+	trimmedLines []string
+	trimOffset   int
+}
 
+func (p *Provider) buildRequest(req *types.CompletionRequest) *preparedRequest {
 	lines, cursorRow, cursorCol, trimOffset := p.truncateContext(req.Lines, req.CursorRow, req.CursorCol)
 	if trimOffset > 0 {
 		logger.Debug("sweepapi: truncated context, removed %d lines from start", trimOffset)
@@ -298,10 +307,9 @@ func (p *Provider) PrepareLineStream(ctx context.Context, req *types.CompletionR
 	cursorPosition := sweepapi.CursorToByteOffset(lines, cursorRow, cursorCol)
 
 	diffHistories := p.truncateDiffHistories(req.FileDiffHistories)
-	recentChanges := formatRecentChanges(diffHistories)
+	recentChanges, recentChangesHighRes := formatRecentChangesSplit(diffHistories)
 
-	retrievalChunks := p.formatDiagnostics(req.GetDiagnostics())
-	retrievalChunks = append(retrievalChunks, formatTreesitterChunk(req.GetTreesitter())...)
+	retrievalChunks := formatTreesitterChunk(req.GetTreesitter())
 	retrievalChunks = append(retrievalChunks, formatGitDiffChunk(req.GetGitDiff())...)
 
 	repoName := filepath.Base(req.WorkspacePath)
@@ -316,6 +324,7 @@ func (p *Provider) PrepareLineStream(ctx context.Context, req *types.CompletionR
 		OriginalFileContents: originalFileContents,
 		CursorPosition:       cursorPosition,
 		RecentChanges:        recentChanges,
+		RecentChangesHighRes: recentChangesHighRes,
 		ChangesAboveCursor:   true,
 		MultipleSuggestions:  true,
 		UseBytes:             true,
@@ -323,15 +332,29 @@ func (p *Provider) PrepareLineStream(ctx context.Context, req *types.CompletionR
 		FileChunks:           p.buildFileChunks(req.RecentBufferSnapshots),
 		RecentUserActions:    convertUserActions(req.UserActions),
 		RetrievalChunks:      retrievalChunks,
+		EditorDiagnostics:    p.buildEditorDiagnostics(req.GetDiagnostics()),
 	}
 
 	p.logRequest(apiReq)
 
-	stream := p.client.DoCompletionStream(ctx, apiReq, fileContents)
-
-	sctx := &streamContext{
+	return &preparedRequest{
+		apiReq:       apiReq,
+		fileContents: fileContents,
 		trimmedLines: lines,
 		trimOffset:   trimOffset,
+	}
+}
+
+// PrepareLineStream implements engine.LineStreamProvider
+func (p *Provider) PrepareLineStream(ctx context.Context, req *types.CompletionRequest) (engine.LineStream, any, error) {
+	defer logger.Trace("sweepapi.PrepareLineStream")()
+
+	pr := p.buildRequest(req)
+	stream := p.client.DoCompletionStream(ctx, pr.apiReq, pr.fileContents)
+
+	sctx := &streamContext{
+		trimmedLines: pr.trimmedLines,
+		trimOffset:   pr.trimOffset,
 		stream:       stream,
 	}
 
@@ -378,54 +401,9 @@ func (p *Provider) GetContextLimits() engine.ContextLimits {
 func (p *Provider) GetCompletion(ctx context.Context, req *types.CompletionRequest) (*types.CompletionResponse, error) {
 	defer logger.Trace("sweepapi.GetCompletion")()
 
-	// Apply context limits
-	lines, cursorRow, cursorCol, trimOffset := p.truncateContext(req.Lines, req.CursorRow, req.CursorCol)
-	if trimOffset > 0 {
-		logger.Debug("sweepapi: truncated context, removed %d lines from start", trimOffset)
-	}
+	pr := p.buildRequest(req)
 
-	// Build file contents from lines
-	fileContents := strings.Join(lines, "\n")
-	originalFileContents := p.buildOriginalFileContents(req.OriginalLines, fileContents)
-
-	// Convert cursor to byte offset
-	cursorPosition := sweepapi.CursorToByteOffset(lines, cursorRow, cursorCol)
-
-	// Truncate and format recent changes from diff histories
-	diffHistories := p.truncateDiffHistories(req.FileDiffHistories)
-	recentChanges := formatRecentChanges(diffHistories)
-
-	// Format diagnostics, treesitter, and git diff as retrieval chunks
-	retrievalChunks := p.formatDiagnostics(req.GetDiagnostics())
-	retrievalChunks = append(retrievalChunks, formatTreesitterChunk(req.GetTreesitter())...)
-	retrievalChunks = append(retrievalChunks, formatGitDiffChunk(req.GetGitDiff())...)
-
-	// Extract repo name from workspace path
-	repoName := filepath.Base(req.WorkspacePath)
-	if repoName == "" || repoName == "." {
-		repoName = "untitled"
-	}
-
-	// Build API request
-	apiReq := &sweepapi.AutocompleteRequest{
-		RepoName:             repoName,
-		FilePath:             req.FilePath,
-		FileContents:         fileContents,
-		OriginalFileContents: originalFileContents,
-		CursorPosition:       cursorPosition,
-		RecentChanges:        recentChanges,
-		ChangesAboveCursor:   true,
-		MultipleSuggestions:  true,
-		UseBytes:             true,
-		PrivacyModeEnabled:   p.config.PrivacyMode,
-		FileChunks:           p.buildFileChunks(req.RecentBufferSnapshots),
-		RecentUserActions:    convertUserActions(req.UserActions),
-		RetrievalChunks:      retrievalChunks,
-	}
-
-	p.logRequest(apiReq)
-
-	responses, err := p.client.DoCompletion(ctx, apiReq)
+	responses, err := p.client.DoCompletion(ctx, pr.apiReq)
 	if err != nil {
 		return nil, err
 	}
@@ -447,10 +425,9 @@ func (p *Provider) GetCompletion(ctx context.Context, req *types.CompletionReque
 	autocompleteID := edits[0].AutocompleteID
 
 	// Apply all byte-range edits to produce unified new text
-	modifiedText := sweepapi.ApplyByteRangeEdits(fileContents, edits)
+	modifiedText := sweepapi.ApplyByteRangeEdits(pr.fileContents, edits)
 
-	// Diff original vs modified to find the affected line range
-	origLines := strings.Split(fileContents, "\n")
+	origLines := strings.Split(pr.fileContents, "\n")
 	modLines := strings.Split(modifiedText, "\n")
 
 	// Find first and last differing lines (0-indexed)
@@ -484,8 +461,8 @@ func (p *Provider) GetCompletion(ctx context.Context, req *types.CompletionReque
 
 	return &types.CompletionResponse{
 		Completions: []*types.Completion{{
-			StartLine:  startLine + trimOffset,
-			EndLineInc: origEndLine + trimOffset,
+			StartLine:  startLine + pr.trimOffset,
+			EndLineInc: origEndLine + pr.trimOffset,
 			Lines:      newLines,
 		}},
 		MetricsInfo: &types.MetricsInfo{
@@ -524,85 +501,136 @@ func countChanges(oldLineCount, newLineCount int) (additions, deletions int) {
 	return max(newLineCount, 1), max(oldLineCount, 1)
 }
 
-// formatRecentChanges converts FileDiffHistories to a string for the API
-// Format: "File: path:\n{diff}\n"
-func formatRecentChanges(histories []*types.FileDiffHistory) string {
+const (
+	// recentChangesToSend is the number of most-recent diff entries for the
+	// compact recent_changes field (matches JetBrains RECENT_CHANGES_TO_SEND).
+	recentChangesToSend = 6
+	// highResChangesToSend is the limit for the higher-fidelity
+	// recent_changes_high_res field (matches JetBrains HIGH_RES_RECENT_CHANGES_TO_SEND).
+	highResChangesToSend = 16
+	// maxDiffHunkSize is the maximum character length of a single formatted
+	// diff hunk before it is dropped (matches JetBrains MAX_DIFF_HUNK_SIZE).
+	maxDiffHunkSize = 20_000
+)
+
+// formatRecentChangesSplit converts FileDiffHistories into two strings:
+//   - recentChanges: the last recentChangesToSend entries (compact context)
+//   - recentChangesHighRes: the last highResChangesToSend entries (full context)
+//
+// This matches the JetBrains plugin which sends both recent_changes and
+// recent_changes_high_res to give the model two granularity levels.
+func formatRecentChangesSplit(histories []*types.FileDiffHistory) (string, string) {
 	if len(histories) == 0 {
-		return ""
+		return "", ""
 	}
 
-	var sb strings.Builder
+	// Collect all formatted entries across files, preserving chronological order
+	type formattedEntry struct {
+		filePath string
+		diff     string
+	}
+	var all []formattedEntry
 	for _, history := range histories {
-		if len(history.DiffHistory) == 0 {
-			continue
-		}
-
-		// Format each diff entry for this file
-		var diffContent strings.Builder
 		for _, entry := range history.DiffHistory {
-			if entry.Original != "" || entry.Updated != "" {
-				diffContent.WriteString("<<<<<<< ORIGINAL\n")
-				diffContent.WriteString(entry.Original)
-				if !strings.HasSuffix(entry.Original, "\n") && entry.Original != "" {
-					diffContent.WriteString("\n")
-				}
-				diffContent.WriteString("=======\n")
-				diffContent.WriteString(entry.Updated)
-				if !strings.HasSuffix(entry.Updated, "\n") && entry.Updated != "" {
-					diffContent.WriteString("\n")
-				}
-				diffContent.WriteString(">>>>>>> UPDATED\n")
+			if entry.Original == "" && entry.Updated == "" {
+				continue
 			}
+			// Skip entries that would exceed the hunk size limit.
+			// The formatted overhead is ~50 bytes; check raw size first to avoid allocation.
+			if len(entry.Original)+len(entry.Updated)+50 > maxDiffHunkSize {
+				continue
+			}
+			formatted := formatDiffHunk(entry)
+			all = append(all, formattedEntry{filePath: history.FileName, diff: formatted})
 		}
+	}
 
-		if diffContent.Len() > 0 {
+	buildString := func(entries []formattedEntry) string {
+		if len(entries) == 0 {
+			return ""
+		}
+		var sb strings.Builder
+		for _, e := range entries {
 			sb.WriteString("File: ")
-			sb.WriteString(history.FileName)
+			sb.WriteString(e.filePath)
 			sb.WriteString(":\n")
-			sb.WriteString(diffContent.String())
+			sb.WriteString(e.diff)
 			sb.WriteString("\n")
 		}
+		return sb.String()
 	}
 
+	// High-res: last highResChangesToSend entries
+	highResStart := max(0, len(all)-highResChangesToSend)
+	highResEntries := all[highResStart:]
+
+	// Regular: last recentChangesToSend entries
+	regularStart := max(0, len(all)-recentChangesToSend)
+	regularEntries := all[regularStart:]
+
+	return buildString(regularEntries), buildString(highResEntries)
+}
+
+// formatDiffHunk formats a single DiffEntry into the ORIGINAL/UPDATED format.
+func formatDiffHunk(entry *types.DiffEntry) string {
+	var sb strings.Builder
+	sb.WriteString("<<<<<<< ORIGINAL\n")
+	sb.WriteString(entry.Original)
+	if !strings.HasSuffix(entry.Original, "\n") && entry.Original != "" {
+		sb.WriteString("\n")
+	}
+	sb.WriteString("=======\n")
+	sb.WriteString(entry.Updated)
+	if !strings.HasSuffix(entry.Updated, "\n") && entry.Updated != "" {
+		sb.WriteString("\n")
+	}
+	sb.WriteString(">>>>>>> UPDATED\n")
 	return sb.String()
 }
 
-func (p *Provider) formatDiagnostics(linterErrors *types.LinterErrors) []sweepapi.FileChunk {
-	if linterErrors == nil || len(linterErrors.Errors) == 0 {
-		return []sweepapi.FileChunk{}
+// maxEditorDiagnostics caps diagnostics per request (matches JetBrains limit).
+const maxEditorDiagnostics = 50
+
+// buildEditorDiagnostics converts LSP diagnostics into structured
+// EditorDiagnostic entries for the dedicated editor_diagnostics field.
+func (p *Provider) buildEditorDiagnostics(diags *types.Diagnostics) []sweepapi.EditorDiagnostic {
+	if diags == nil || len(diags.Items) == 0 {
+		return nil
 	}
 
-	var sb strings.Builder
-	lineCount := 0
-	for _, err := range linterErrors.Errors {
-		if sb.Len() >= p.limits.MaxInputBytes || lineCount >= p.limits.MaxInputLines {
+	now := time.Now().UnixMilli()
+	result := make([]sweepapi.EditorDiagnostic, 0, min(len(diags.Items), maxEditorDiagnostics))
+
+	for _, d := range diags.Items {
+		if len(result) >= maxEditorDiagnostics {
 			break
 		}
-		if err.Range != nil {
-			sb.WriteString("Line ")
-			sb.WriteString(strconv.Itoa(err.Range.StartLine))
-			sb.WriteString(": ")
+
+		line := 0
+		startOff := 0
+		endOff := 0
+		if d.Range != nil {
+			line = d.Range.StartLine
+			startOff = d.Range.StartCharacter
+			endOff = d.Range.EndCharacter
 		}
-		if err.Source != "" {
-			sb.WriteString("[")
-			sb.WriteString(err.Source)
-			sb.WriteString("] ")
+
+		msg := d.Message
+		if d.Source != "" {
+			msg = "[" + d.Source + "] " + msg
 		}
-		sb.WriteString(err.Message)
-		sb.WriteString("\n")
-		lineCount++
+
+		result = append(result, sweepapi.EditorDiagnostic{
+			Line:      line,
+			StartOff:  startOff,
+			EndOff:    endOff,
+			Severity:  d.Severity.String(),
+			Message:   msg,
+			Timestamp: now,
+		})
 	}
 
-	if sb.Len() == 0 {
-		return []sweepapi.FileChunk{}
-	}
-
-	return []sweepapi.FileChunk{{
-		FilePath:  "diagnostics",
-		Content:   sb.String(),
-		StartLine: 1,
-		EndLine:   lineCount,
-	}}
+	return result
 }
 
 func (p *Provider) buildFileChunks(snapshots []*types.RecentBufferSnapshot) []sweepapi.FileChunk {
@@ -676,11 +704,12 @@ func formatTreesitterChunk(ts *types.TreesitterContext) []sweepapi.FileChunk {
 		return nil
 	}
 
+	content := sb.String()
 	return []sweepapi.FileChunk{{
 		FilePath:  "treesitter_context",
-		Content:   sb.String(),
+		Content:   content,
 		StartLine: 1,
-		EndLine:   strings.Count(sb.String(), "\n"),
+		EndLine:   strings.Count(content, "\n"),
 	}}
 }
 

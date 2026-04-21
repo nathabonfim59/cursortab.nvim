@@ -510,22 +510,22 @@ func TestWriteDiagnosticsPseudoFile_Empty(t *testing.T) {
 	writeDiagnosticsPseudoFile(&b, nil)
 	assert.Equal(t, "", b.String(), "nil writes nothing")
 
-	writeDiagnosticsPseudoFile(&b, &types.LinterErrors{Errors: nil})
+	writeDiagnosticsPseudoFile(&b, &types.Diagnostics{Items: nil})
 	assert.Equal(t, "", b.String(), "empty errors writes nothing")
 }
 
 func TestWriteDiagnosticsPseudoFile_Format(t *testing.T) {
 	var b strings.Builder
-	writeDiagnosticsPseudoFile(&b, &types.LinterErrors{
-		Errors: []*types.LinterError{
+	writeDiagnosticsPseudoFile(&b, &types.Diagnostics{
+		Items: []*types.Diagnostic{
 			{
-				Severity: "error",
+				Severity: types.SeverityError,
 				Message:  "undefined: foo",
 				Source:   "gopls",
 				Range:    &types.CursorRange{StartLine: 10},
 			},
 			{
-				Severity: "warning",
+				Severity: types.SeverityWarning,
 				Message:  "unused variable bar",
 				Source:   "gopls",
 			},
@@ -533,8 +533,8 @@ func TestWriteDiagnosticsPseudoFile_Format(t *testing.T) {
 	})
 	out := b.String()
 	assert.True(t, strings.HasPrefix(out, fileMarker+"diagnostics\n"), "starts with diagnostics header")
-	assert.True(t, strings.Contains(out, "line 10: [error] undefined: foo (source: gopls)"), "first diag")
-	assert.True(t, strings.Contains(out, "[warning] unused variable bar (source: gopls)"), "second diag")
+	assert.True(t, strings.Contains(out, "line 10: [ERROR] undefined: foo (source: gopls)"), "first diag")
+	assert.True(t, strings.Contains(out, "[WARNING] unused variable bar (source: gopls)"), "second diag")
 }
 
 func TestWriteTreesitterPseudoFile_Empty(t *testing.T) {
@@ -737,9 +737,9 @@ func TestAssemblePrompt_ContextOrderingAndCoexistence(t *testing.T) {
 			{FilePath: "helper.go", Lines: []string{"package main", "func help() {}"}},
 		},
 		AdditionalContext: &types.ContextResult{
-			Diagnostics: &types.LinterErrors{
-				Errors: []*types.LinterError{
-					{Severity: "error", Message: "oops", Source: "gopls", Range: &types.CursorRange{StartLine: 3}},
+			Diagnostics: &types.Diagnostics{
+				Items: []*types.Diagnostic{
+					{Severity: types.SeverityError, Message: "oops", Source: "gopls", Range: &types.CursorRange{StartLine: 3}},
 				},
 			},
 			Treesitter: &types.TreesitterContext{

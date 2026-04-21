@@ -33,9 +33,11 @@ type BehaviorConfig struct {
 
 // FIMTokensConfig holds FIM token settings
 type FIMTokensConfig struct {
-	Prefix string `json:"prefix"`
-	Suffix string `json:"suffix"`
-	Middle string `json:"middle"`
+	Prefix   string `json:"prefix"`
+	Suffix   string `json:"suffix"`
+	Middle   string `json:"middle"`
+	RepoName string `json:"repo_name"`
+	FileSep  string `json:"file_sep"`
 }
 
 // ProviderConfig holds provider-specific settings

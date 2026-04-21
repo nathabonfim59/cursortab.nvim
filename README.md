@@ -1,6 +1,6 @@
 # cursortab.nvim
 
-A Neovim plugin that provides local edit completions and cursor predictions.
+A Neovim plugin that provides edit completions and cursor predictions.
 
 > [!NOTE]
 >
@@ -8,11 +8,6 @@ A Neovim plugin that provides local edit completions and cursor predictions.
 > [open dataset](https://github.com/cursortab/api). Set `contribute_data = true`
 > in your config to opt in. No code content or file paths are collected —
 > [see the schema](https://github.com/cursortab/api/blob/main/docs/community-data-schema.md).
-
-> [!WARNING]
->
-> **This is an early-stage project.** Expect bugs, incomplete features, and
-> breaking changes. Make sure to regularly update the plugin.
 
 <p align="center">
     <img src="assets/demo.gif" width="600">
@@ -24,7 +19,7 @@ A Neovim plugin that provides local edit completions and cursor predictions.
 * [Installation](#installation)
   * [Mercury API (hosted, no local GPU needed)](#mercury-api-hosted-no-local-gpu-needed)
   * [Zeta-2 (local next-edit prediction)](#zeta-2-local-next-edit-prediction)
-  * [Qwen3.5-0.8B (fastest local)](#qwen35-08b-fastest-local)
+  * [Qwen3.5-0.8B/Sweep (fastest local)](#qwen35-08bsweep-fastest-local)
   * [Using lazy.nvim](#using-lazynvim)
   * [Using packer.nvim](#using-packernvim)
 * [Configuration](#configuration)
@@ -61,8 +56,8 @@ Recommended starting points:
 
 - **Best hosted:** Mercury API
 - **Best local next-edit:** Zeta-2
-- **Fastest local:** Qwen3.5-0.8B with the `fim` or `inline` provider, or Sweep
-  1.5B/0.5B with the `sweep` provider
+- **Fastest local:** Qwen3.5-0.8B with the `inline` provider, or Sweep 1.5B/0.5B
+  with the `sweep` provider
 
 Pick a provider below, then use the matching `setup()` call in your plugin
 config. See [Providers](#providers) for all available options.
@@ -84,12 +79,14 @@ Run [llama.cpp](https://github.com/ggml-org/llama.cpp):
 llama-server -hf bartowski/zed-industries_zeta-2-GGUF:Q8_0 --port 8000
 ```
 
-### Qwen3.5-0.8B (fastest local)
+### Qwen3.5-0.8B/Sweep (fastest local)
 
 Run [llama.cpp](https://github.com/ggml-org/llama.cpp):
 
 ```bash
 llama-server -hf unsloth/Qwen3.5-0.8B-GGUF:Q8_0 --port 8000
+# llama-server -hf sweepai/sweep-next-edit-0.5b --port 8000
+# llama-server -hf sweepai/sweep-next-edit-1.5b --port 8000
 ```
 
 ### Using [lazy.nvim](https://github.com/folke/lazy.nvim)
@@ -107,13 +104,15 @@ llama-server -hf unsloth/Qwen3.5-0.8B-GGUF:Q8_0 --port 8000
         type = "mercuryapi",
         api_key_env = "MERCURY_AI_TOKEN",
 
-        -- Zeta-2 (local)
+        -- Zeta-2 (best local)
         -- type = "zeta-2",
         -- url = "http://localhost:8000",
-        -- model = "zeta-2",
 
-        -- Qwen3.5-0.8B (fastest local, use "fim" or "inline")
-        -- type = "fim",
+        -- Qwen3.5-0.8B (fastest local, defaults to "inline")
+        -- url = "http://localhost:8000",
+
+        -- sweep-next-edit-0.5B/1.5B (fastest local)
+        -- type = "sweep",
         -- url = "http://localhost:8000",
       },
     })
@@ -219,6 +218,8 @@ require("cursortab").setup({
       prefix = "<|fim_prefix|>",
       suffix = "<|fim_suffix|>",
       middle = "<|fim_middle|>",
+      repo_name = "",                     -- Optional: "<|repo_name|>" enables cross-file context (auto-detected for Qwen models)
+      file_sep = "",                      -- Optional: "<|file_sep|>" enables cross-file context (auto-detected for Qwen models)
     },
     privacy_mode = true,                  -- Don't send telemetry to provider
   },
@@ -280,18 +281,21 @@ Zeta-2, Zeta (legacy), Copilot, Windsurf, and Mercury API.
 | Context             | inline | fim | sweep | zeta-2 | zeta | sweepapi | copilot | windsurf | mercuryapi |
 | ------------------- | :----: | :-: | :---: | :----: | :--: | :------: | :-----: | :------: | :--------: |
 | Buffer content      |   ✓    |  ✓  |   ✓   |   ✓    |  ✓   |    ✓     |         |    ✓     |     ✓      |
-| Edit history        |        |     |   ✓   |   ✓    |  ✓   |    ✓     |         |          |     ✓      |
+| Edit history        |        |  ✓° |   ✓   |   ✓    |  ✓   |    ✓     |         |          |     ✓      |
 | Previous file state |        |     |   ✓   |        |      |    ✓     |         |          |            |
-| LSP diagnostics     |        |     |       |   ✓    |  ✓   |    ✓     |         |          |     ✓      |
-| Treesitter context  |        |     |   ✓   |   ✓    |  ✓   |    ✓     |         |          |     ✓      |
-| Git diff context    |        |     |   ✓   |   ✓    |  ✓   |    ✓     |         |          |     ✓      |
-| Recent files        |        |     |   ✓   |   ✓    |  ✓   |    ✓     |         |          |     ✓      |
+| LSP diagnostics     |        |  ✓° |   ✓   |   ✓    |  ✓   |    ✓     |         |          |     ✓      |
+| Treesitter context  |        |  ✓° |   ✓   |   ✓    |  ✓   |    ✓     |         |          |     ✓      |
+| Git diff context    |        |  ✓° |   ✓   |   ✓    |  ✓   |    ✓     |         |          |     ✓      |
+| Recent files        |        |  ✓° |   ✓   |   ✓    |  ✓   |    ✓     |         |          |     ✓      |
 | User actions        |        |     |   ✓   |        |      |    ✓     |         |          |            |
+
+° FIM cross-file context requires repo-level tokens (`repo_name`, `file_sep`).
+Auto-detected for Qwen models; set manually for other models that support them.
 
 #### Benchmarks
 
-Measured on 50 scenarios (25 quality + 25 suppress) using the eval harness.
-Sorted by Score (higher = better):
+Measured on 50 scenarios (25 quality + 25 suppress) using the
+[eval harness](CONTRIBUTING.md#eval-harness). Sorted by Score (higher = better):
 
 - **Score** — `deltaChrF × gateScore / 100` where
   `gateScore = 2 × showRate × quietRate / (showRate + quietRate)`. Combines edit
@@ -346,6 +350,9 @@ llama-server -hf unsloth/Qwen3.5-0.8B-GGUF:Q8_0 --port 8000
 
 Fill-in-the-Middle multi-line completion. Compatible with Qwen, DeepSeek-Coder,
 and similar FIM-capable models.
+
+From experimentation, FIM models need to be >7B models to have consistent
+results.
 
 ```lua
 require("cursortab").setup({
@@ -422,7 +429,6 @@ require("cursortab").setup({
   provider = {
     type = "zeta-2",
     url = "http://localhost:8000",
-    model = "zeta-2",
   },
 })
 ```
@@ -446,7 +452,6 @@ require("cursortab").setup({
   provider = {
     type = "zeta",
     url = "http://localhost:8000",
-    model = "zeta",
   },
 })
 ```

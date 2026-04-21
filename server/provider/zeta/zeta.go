@@ -17,7 +17,7 @@
 //	### Diagnostics:                       (omitted if no diagnostics)
 //	Diagnostics in "file.go":
 //	```diagnostics
-//	line 10: [DIAGNOSTIC_SEVERITY_ERROR] undefined: foo (source: gopls)
+//	line 10: [ERROR] undefined: foo (source: gopls)
 //	```
 //
 //	### Code Context:                      (omitted if no treesitter context)
@@ -196,32 +196,18 @@ func buildUserExcerpt(req *types.CompletionRequest, ctx *provider.Context) strin
 
 func formatDiagnosticsForPrompt(req *types.CompletionRequest) string {
 	diag := req.GetDiagnostics()
-	if diag == nil || len(diag.Errors) == 0 {
+	text := provider.FormatDiagnosticsText(diag)
+	if text == "" {
 		return ""
 	}
 
-	var diagBuilder strings.Builder
-
-	diagBuilder.WriteString("Diagnostics in \"")
-	diagBuilder.WriteString(diag.RelativeWorkspacePath)
-	diagBuilder.WriteString("\":\n")
-	diagBuilder.WriteString("```diagnostics\n")
-
-	for _, err := range diag.Errors {
-		if err.Range != nil {
-			fmt.Fprintf(&diagBuilder, "line %d: ", err.Range.StartLine)
-		}
-
-		fmt.Fprintf(&diagBuilder, "[%s] %s", err.Severity, err.Message)
-
-		if err.Source != "" {
-			fmt.Fprintf(&diagBuilder, " (source: %s)", err.Source)
-		}
-		diagBuilder.WriteString("\n")
-	}
-
-	diagBuilder.WriteString("```")
-	return diagBuilder.String()
+	var b strings.Builder
+	b.WriteString("Diagnostics in \"")
+	b.WriteString(diag.FilePath)
+	b.WriteString("\":\n```diagnostics\n")
+	b.WriteString(text)
+	b.WriteString("```")
+	return b.String()
 }
 
 func formatTreesitterForPrompt(req *types.CompletionRequest) string {

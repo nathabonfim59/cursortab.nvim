@@ -175,6 +175,125 @@ func TestParseCompletion_MultiLineCompletion(t *testing.T) {
 	assert.Equal(t, "  fmt.Println()", resp.Completions[0].Lines[1], "middle line")
 }
 
+func TestBuildPrompt_RepoContext(t *testing.T) {
+	config := &types.ProviderConfig{
+		ProviderModel: "test-model",
+		FIMTokens: types.FIMTokenConfig{
+			Prefix:   "<PRE>",
+			Suffix:   "<SUF>",
+			Middle:   "<MID>",
+			RepoName: "<|repo_name|>",
+			FileSep:  "<|file_sep|>",
+		},
+	}
+	p := NewProvider(config)
+
+	ctx := &provider.Context{
+		Request: &types.CompletionRequest{
+			WorkspacePath: "/home/user/myproject",
+			FilePath:      "main.go",
+			CursorCol:     5,
+			RecentBufferSnapshots: []*types.RecentBufferSnapshot{
+				{FilePath: "utils.go", Lines: []string{"package main", "", "func helper() {}"}},
+			},
+			AdditionalContext: &types.ContextResult{
+				Diagnostics: &types.Diagnostics{
+					Items: []*types.Diagnostic{
+						{Message: "undefined: foo", Severity: types.SeverityError, Source: "gopls", Range: &types.CursorRange{StartLine: 10}},
+					},
+				},
+				Treesitter: &types.TreesitterContext{
+					EnclosingSignature: "func main()",
+					Siblings:           []*types.TreesitterSymbol{{Signature: "func helper()", Line: 5}},
+					Imports:            []string{"import \"fmt\""},
+				},
+			},
+		},
+		TrimmedLines: []string{"hello world"},
+		CursorLine:   0,
+	}
+
+	req := p.PromptBuilder(p, ctx)
+
+	assert.True(t, strings.Contains(req.Prompt, "<|repo_name|>myproject\n"), "should have repo name")
+	assert.True(t, strings.Contains(req.Prompt, "<|file_sep|>utils.go\n"), "should have recent file")
+	assert.True(t, strings.Contains(req.Prompt, "package main"), "should have recent file content")
+	assert.True(t, strings.Contains(req.Prompt, "<|file_sep|>context/diagnostics\n"), "should have diagnostics section")
+	assert.True(t, strings.Contains(req.Prompt, "undefined: foo"), "should have diagnostic message")
+	assert.True(t, strings.Contains(req.Prompt, "<|file_sep|>context/treesitter\n"), "should have treesitter section")
+	assert.True(t, strings.Contains(req.Prompt, "Enclosing scope: func main()"), "should have enclosing scope")
+	assert.True(t, strings.Contains(req.Prompt, "<|file_sep|>main.go\n"), "should have current file header")
+	assert.True(t, strings.Contains(req.Prompt, "<PRE>hello<SUF> world<MID>"), "should have FIM tokens at end")
+}
+
+func TestBuildPrompt_NoRepoContextWithoutTokens(t *testing.T) {
+	config := &types.ProviderConfig{
+		ProviderModel: "test-model",
+		FIMTokens: types.FIMTokenConfig{
+			Prefix: "<PRE>",
+			Suffix: "<SUF>",
+			Middle: "<MID>",
+		},
+	}
+	p := NewProvider(config)
+
+	ctx := &provider.Context{
+		Request: &types.CompletionRequest{
+			WorkspacePath: "/home/user/myproject",
+			FilePath:      "main.go",
+			CursorCol:     5,
+			RecentBufferSnapshots: []*types.RecentBufferSnapshot{
+				{FilePath: "utils.go", Lines: []string{"package main"}},
+			},
+		},
+		TrimmedLines: []string{"hello world"},
+		CursorLine:   0,
+	}
+
+	req := p.PromptBuilder(p, ctx)
+
+	assert.False(t, strings.Contains(req.Prompt, "repo_name"), "should NOT have repo context")
+	assert.False(t, strings.Contains(req.Prompt, "file_sep"), "should NOT have file_sep")
+	assert.Equal(t, "<PRE>hello<SUF> world<MID>", req.Prompt, "should be plain FIM prompt")
+}
+
+func TestBuildPrompt_RepoContextStopTokens(t *testing.T) {
+	config := &types.ProviderConfig{
+		ProviderModel: "test-model",
+		FIMTokens: types.FIMTokenConfig{
+			Prefix:   "<PRE>",
+			Suffix:   "<SUF>",
+			Middle:   "<MID>",
+			RepoName: "<|repo_name|>",
+			FileSep:  "<|file_sep|>",
+		},
+	}
+	p := NewProvider(config)
+
+	ctx := &provider.Context{
+		Request: &types.CompletionRequest{
+			FilePath:  "main.go",
+			CursorCol: 5,
+		},
+		TrimmedLines: []string{"hello world"},
+		CursorLine:   0,
+	}
+
+	req := p.PromptBuilder(p, ctx)
+
+	assert.True(t, containsStr(req.Stop, "<|file_sep|>"), "stop tokens should include file_sep")
+	assert.True(t, containsStr(req.Stop, "<PRE>"), "stop tokens should include prefix")
+}
+
+func containsStr(slice []string, s string) bool {
+	for _, v := range slice {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
 func TestParseCompletion_SingleLineWithAfterCursor(t *testing.T) {
 	config := &types.ProviderConfig{
 		ProviderModel: "test-model",

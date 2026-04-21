@@ -117,6 +117,8 @@ Full configuration with defaults: >lua
         prefix = "<|fim_prefix|>",
         suffix = "<|fim_suffix|>",
         middle = "<|fim_middle|>",
+        repo_name = "",             -- Optional: enables cross-file context
+        file_sep = "",              -- Optional: enables cross-file context
       },
     },
 
@@ -321,12 +323,19 @@ PROVIDER OPTIONS                                    *cursortab-config-provider*
 
   `fim_tokens`                                 *cursortab-config-provider-fim*
       FIM (Fill-in-the-Middle) tokens configuration. Only used by the FIM
-      provider. When nil, uses default tokens. Example: >lua
+      provider. When nil, uses default tokens.
+
+      When `repo_name` and `file_sep` are set, the FIM provider prepends
+      cross-file context (recent files, diagnostics, treesitter, diff history,
+      staged git diff) using repo-level FIM tokens. These are auto-detected
+      for Qwen models (Qwen2.5-Coder, Qwen3.5). Example: >lua
 
         fim_tokens = {
           prefix = "<|fim_prefix|>",   -- Token before prefix content
           suffix = "<|fim_suffix|>",   -- Token before suffix content
           middle = "<|fim_middle|>",   -- Token before completion
+          repo_name = "<|repo_name|>", -- Optional: repo-level context header
+          file_sep = "<|file_sep|>",   -- Optional: file separator for context
         }
 <
   `privacy_mode`                         *cursortab-config-provider-privacy-mode*

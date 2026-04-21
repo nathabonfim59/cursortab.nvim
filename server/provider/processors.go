@@ -489,6 +489,32 @@ func handleTruncatedCompletionWithAnchor(
 	return newLines, endLineInc, false
 }
 
+// FormatDiagnosticsText renders diagnostics as plain text lines:
+//
+//	line 10: [ERROR] undefined: foo (source: gopls)
+//	[WARNING] unused variable bar (source: gopls)
+//
+// Used by zeta, zeta2, and mercuryapi providers. Returns empty string
+// if there are no diagnostics.
+func FormatDiagnosticsText(diag *types.Diagnostics) string {
+	if diag == nil || len(diag.Items) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	for _, d := range diag.Items {
+		if d.Range != nil {
+			fmt.Fprintf(&b, "line %d: ", d.Range.StartLine)
+		}
+		fmt.Fprintf(&b, "[%s] %s", d.Severity, d.Message)
+		if d.Source != "" {
+			fmt.Fprintf(&b, " (source: %s)", d.Source)
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
 // IsNoOpReplacement checks if replacing oldLines with newLines would result in no change.
 func IsNoOpReplacement(newLines, oldLines []string) bool {
 	newText := strings.TrimRight(strings.Join(newLines, "\n"), " \t\n\r")

@@ -66,18 +66,43 @@ type MetricsInfo struct {
 	Deletions int    // Number of lines deleted
 }
 
-// LinterErrors represents linter error information for the current file
-type LinterErrors struct {
-	RelativeWorkspacePath string
-	Errors                []*LinterError
-	FileContents          string
+// DiagnosticSeverity matches Neovim's vim.diagnostic.severity values.
+type DiagnosticSeverity int
+
+const (
+	SeverityError       DiagnosticSeverity = 1
+	SeverityWarning     DiagnosticSeverity = 2
+	SeverityInformation DiagnosticSeverity = 3
+	SeverityHint        DiagnosticSeverity = 4
+)
+
+// String returns the short uppercase label for the severity.
+func (s DiagnosticSeverity) String() string {
+	switch s {
+	case SeverityError:
+		return "ERROR"
+	case SeverityWarning:
+		return "WARNING"
+	case SeverityInformation:
+		return "INFORMATION"
+	case SeverityHint:
+		return "HINT"
+	default:
+		return "ERROR"
+	}
 }
 
-// LinterError represents a single linter error
-type LinterError struct {
+// Diagnostics holds LSP diagnostics for a buffer.
+type Diagnostics struct {
+	FilePath string        // Workspace-relative path
+	Items    []*Diagnostic // Individual diagnostic entries
+}
+
+// Diagnostic represents a single LSP diagnostic from Neovim.
+type Diagnostic struct {
 	Message  string
 	Source   string
-	Severity string
+	Severity DiagnosticSeverity
 	Range    *CursorRange
 }
 
@@ -113,13 +138,13 @@ type GitDiffContext struct {
 
 // ContextResult holds gathered context from context sources
 type ContextResult struct {
-	Diagnostics *LinterErrors      // LSP diagnostics (nil if unavailable)
+	Diagnostics *Diagnostics       // LSP diagnostics (nil if unavailable)
 	Treesitter  *TreesitterContext // Treesitter scope context (nil if unavailable)
 	GitDiff     *GitDiffContext    // Staged git diff (nil if not COMMIT_EDITMSG)
 }
 
 // GetDiagnostics returns diagnostics from AdditionalContext, or nil if unavailable
-func (r *CompletionRequest) GetDiagnostics() *LinterErrors {
+func (r *CompletionRequest) GetDiagnostics() *Diagnostics {
 	if r.AdditionalContext == nil {
 		return nil
 	}
@@ -229,9 +254,11 @@ const (
 
 // FIMTokenConfig holds FIM (Fill-in-the-Middle) token configuration
 type FIMTokenConfig struct {
-	Prefix string // Token before the prefix content (e.g., "<|fim_prefix|>")
-	Suffix string // Token before the suffix content (e.g., "<|fim_suffix|>")
-	Middle string // Token before the middle/completion (e.g., "<|fim_middle|>")
+	Prefix   string // Token before the prefix content (e.g., "<|fim_prefix|>")
+	Suffix   string // Token before the suffix content (e.g., "<|fim_suffix|>")
+	Middle   string // Token before the middle/completion (e.g., "<|fim_middle|>")
+	RepoName string // Optional repo-level FIM token (e.g., "<|repo_name|>")
+	FileSep  string // Optional file separator token (e.g., "<|file_sep|>")
 }
 
 // ProviderConfig holds configuration for providers

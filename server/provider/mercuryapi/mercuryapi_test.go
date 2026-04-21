@@ -144,19 +144,19 @@ func TestBuildPromptWithSnapshots(t *testing.T) {
 
 func TestBuildPromptWithDiagnostics(t *testing.T) {
 	lines := []string{"code"}
-	diag := &types.LinterErrors{
-		RelativeWorkspacePath: "main.go",
-		Errors: []*types.LinterError{
+	diag := &types.Diagnostics{
+		FilePath: "main.go",
+		Items: []*types.Diagnostic{
 			{
 				Message:  "undefined: processItems",
 				Source:   "gopls",
-				Severity: "error",
+				Severity: types.SeverityError,
 				Range:    &types.CursorRange{StartLine: 12},
 			},
 			{
 				Message:  "unused variable 'x'",
 				Source:   "gopls",
-				Severity: "warning",
+				Severity: types.SeverityWarning,
 			},
 		},
 	}
@@ -164,8 +164,8 @@ func TestBuildPromptWithDiagnostics(t *testing.T) {
 	prompt := buildPrompt("main.go", lines, 1, 1, 1, 1, 1, 0, nil, nil, diag, nil, nil)
 
 	assert.Contains(t, prompt, "code_snippet_file_path: diagnostics", "diagnostics snippet path")
-	assert.Contains(t, prompt, "line 12: [error] undefined: processItems (source: gopls)", "error with line")
-	assert.Contains(t, prompt, "[warning] unused variable 'x' (source: gopls)", "warning without line")
+	assert.Contains(t, prompt, "line 12: [ERROR] undefined: processItems (source: gopls)", "error with line")
+	assert.Contains(t, prompt, "[WARNING] unused variable 'x' (source: gopls)", "warning without line")
 }
 
 func TestBuildPromptWithTreesitter(t *testing.T) {

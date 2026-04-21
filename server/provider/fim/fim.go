@@ -6,12 +6,29 @@
 //	...text before cursor on current line...<|fim_suffix|>...text after cursor on current line...
 //	...lines after cursor...<|fim_middle|>
 //
+// When repo-level tokens (repo_name, file_sep) are configured, cross-file
+// context is prepended before the FIM tokens:
+//
+//	<|repo_name|>workspace
+//	<|file_sep|>path/to/other.go
+//	...recent file contents...
+//	<|file_sep|>context/diagnostics
+//	...LSP diagnostics...
+//	<|file_sep|>context/treesitter
+//	...scope context...
+//	<|file_sep|>context/staged_diff
+//	...git diff...
+//	<|file_sep|>path/to/current.go
+//	<|fim_prefix|>...prefix...<|fim_suffix|>...suffix...<|fim_middle|>
+//
 // The FIM token names are configurable via FIMTokenConfig.
 // The model fills in text between the prefix and suffix.
 // Lines are trimmed to a window around the cursor via the TrimContent preprocessor.
 package fim
 
 import (
+	"fmt"
+	"path/filepath"
 	"strings"
 
 	"cursortab/client/openai"
@@ -21,7 +38,7 @@ import (
 
 // NewProvider creates a new fill-in-the-middle completion provider
 func NewProvider(config *types.ProviderConfig) *provider.Provider {
-	return &provider.Provider{
+	p := &provider.Provider{
 		Name:          "fim",
 		Config:        config,
 		Client:        openai.NewClient(config.ProviderURL, config.CompletionPath, config.APIKey),
@@ -39,6 +56,17 @@ func NewProvider(config *types.ProviderConfig) *provider.Provider {
 			parseCompletion,
 		},
 	}
+
+	if config.FIMTokens.FileSep != "" {
+		p.DiffBuilder = provider.FormatDiffHistory(provider.DiffHistoryOptions{
+			HeaderTemplate: config.FIMTokens.FileSep + "%s.diff\n",
+			Prefix:         "",
+			Suffix:         "",
+			Separator:      "",
+		})
+	}
+
+	return p
 }
 
 // setStreamContext configures streaming diff context for FIM.
@@ -62,47 +90,132 @@ func setStreamContext() provider.Preprocessor {
 }
 
 func buildPrompt(p *provider.Provider, ctx *provider.Context) *openai.CompletionRequest {
-	prefixToken := p.Config.FIMTokens.Prefix
-	suffixToken := p.Config.FIMTokens.Suffix
-	middleToken := p.Config.FIMTokens.Middle
-	var prompt string
+	tokens := p.Config.FIMTokens
+	var prompt strings.Builder
 
+	// Repo-level cross-file context (when repo_name and file_sep are configured)
+	if tokens.RepoName != "" && tokens.FileSep != "" {
+		buildRepoContext(&prompt, p, ctx)
+	}
+
+	// Core FIM prompt
 	if len(ctx.TrimmedLines) == 0 {
-		prompt = prefixToken + suffixToken + middleToken
+		prompt.WriteString(tokens.Prefix)
+		prompt.WriteString(tokens.Suffix)
+		prompt.WriteString(tokens.Middle)
 	} else {
-		var prefixBuilder strings.Builder
-		var suffixBuilder strings.Builder
+		var prefixContent strings.Builder
+		var suffixContent strings.Builder
 
 		for i := range ctx.CursorLine {
-			prefixBuilder.WriteString(ctx.TrimmedLines[i])
-			prefixBuilder.WriteString("\n")
+			prefixContent.WriteString(ctx.TrimmedLines[i])
+			prefixContent.WriteString("\n")
 		}
 
 		if ctx.CursorLine < len(ctx.TrimmedLines) {
 			currentLine := ctx.TrimmedLines[ctx.CursorLine]
 			cursorCol := min(ctx.Request.CursorCol, len(currentLine))
-			prefixBuilder.WriteString(currentLine[:cursorCol])
-			suffixBuilder.WriteString(currentLine[cursorCol:])
+			prefixContent.WriteString(currentLine[:cursorCol])
+			suffixContent.WriteString(currentLine[cursorCol:])
 		}
 
 		for i := ctx.CursorLine + 1; i < len(ctx.TrimmedLines); i++ {
-			suffixBuilder.WriteString("\n")
-			suffixBuilder.WriteString(ctx.TrimmedLines[i])
+			suffixContent.WriteString("\n")
+			suffixContent.WriteString(ctx.TrimmedLines[i])
 		}
 
-		prompt = prefixToken + prefixBuilder.String() + suffixToken + suffixBuilder.String() + middleToken
+		prompt.WriteString(tokens.Prefix)
+		prompt.WriteString(prefixContent.String())
+		prompt.WriteString(tokens.Suffix)
+		prompt.WriteString(suffixContent.String())
+		prompt.WriteString(tokens.Middle)
+	}
+
+	stop := []string{tokens.Prefix, tokens.Suffix, tokens.Middle}
+	if tokens.FileSep != "" {
+		stop = append(stop, tokens.FileSep)
 	}
 
 	return &openai.CompletionRequest{
 		Model:       p.Config.ProviderModel,
-		Prompt:      prompt,
+		Prompt:      prompt.String(),
 		Temperature: p.Config.ProviderTemperature,
 		MaxTokens:   p.Config.ProviderMaxTokens,
 		TopK:        p.Config.ProviderTopK,
-		Stop:        []string{prefixToken, suffixToken, middleToken},
+		Stop:        stop,
 		N:           1,
 		Echo:        false,
 	}
+}
+
+// buildRepoContext prepends cross-file context using repo-level FIM tokens.
+func buildRepoContext(b *strings.Builder, p *provider.Provider, ctx *provider.Context) {
+	req := ctx.Request
+	fileSep := p.Config.FIMTokens.FileSep
+	repoName := p.Config.FIMTokens.RepoName
+
+	// Repo name header
+	workspace := filepath.Base(req.WorkspacePath)
+	if workspace == "" || workspace == "." {
+		workspace = "repo"
+	}
+	b.WriteString(repoName)
+	b.WriteString(workspace)
+	b.WriteString("\n")
+
+	// Recent files
+	for _, snap := range req.RecentBufferSnapshots {
+		b.WriteString(fileSep)
+		b.WriteString(snap.FilePath)
+		b.WriteString("\n")
+		b.WriteString(strings.Join(snap.Lines, "\n"))
+		b.WriteString("\n")
+	}
+
+	// Diagnostics
+	if diagText := provider.FormatDiagnosticsText(req.GetDiagnostics()); diagText != "" {
+		b.WriteString(fileSep)
+		b.WriteString("context/diagnostics\n")
+		b.WriteString(diagText)
+	}
+
+	// Treesitter context
+	if ts := req.GetTreesitter(); ts != nil {
+		hasContent := ts.EnclosingSignature != "" || len(ts.Siblings) > 0 || len(ts.Imports) > 0
+		if hasContent {
+			b.WriteString(fileSep)
+			b.WriteString("context/treesitter\n")
+			if ts.EnclosingSignature != "" {
+				fmt.Fprintf(b, "Enclosing scope: %s\n", ts.EnclosingSignature)
+			}
+			for _, s := range ts.Siblings {
+				fmt.Fprintf(b, "Sibling: %s\n", s.Signature)
+			}
+			for _, imp := range ts.Imports {
+				fmt.Fprintf(b, "Import: %s\n", imp)
+			}
+		}
+	}
+
+	// Diff history
+	if p.DiffBuilder != nil {
+		if diffSection := p.DiffBuilder(req.FileDiffHistories); diffSection != "" {
+			b.WriteString(diffSection)
+		}
+	}
+
+	// Git diff (staged changes)
+	if gd := req.GetGitDiff(); gd != nil && gd.Diff != "" {
+		b.WriteString(fileSep)
+		b.WriteString("context/staged_diff\n")
+		b.WriteString(gd.Diff)
+		b.WriteString("\n")
+	}
+
+	// Current file header
+	b.WriteString(fileSep)
+	b.WriteString(req.FilePath)
+	b.WriteString("\n")
 }
 
 func parseCompletion(p *provider.Provider, ctx *provider.Context) (*types.CompletionResponse, bool) {

@@ -62,11 +62,13 @@ func TestFormatRecentChanges(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := formatRecentChanges(tt.histories)
+			result, resultHighRes := formatRecentChangesSplit(tt.histories)
 			if tt.wantEmpty {
 				assert.Equal(t, "", result, "should be empty")
+				assert.Equal(t, "", resultHighRes, "high-res should be empty")
 			} else {
 				assert.True(t, len(result) > 0, "should not be empty")
+				assert.True(t, len(resultHighRes) > 0, "high-res should not be empty")
 				if tt.wantContains != "" {
 					assert.True(t, strings.Contains(result, tt.wantContains), "should contain expected string")
 				}
@@ -78,7 +80,7 @@ func TestFormatRecentChanges(t *testing.T) {
 func TestFormatDiagnostics(t *testing.T) {
 	tests := []struct {
 		name         string
-		linterErrors *types.LinterErrors
+		linterErrors *types.Diagnostics
 		wantLen      int
 	}{
 		{
@@ -88,17 +90,17 @@ func TestFormatDiagnostics(t *testing.T) {
 		},
 		{
 			name: "empty errors slice",
-			linterErrors: &types.LinterErrors{
-				RelativeWorkspacePath: "test.go",
-				Errors:                []*types.LinterError{},
+			linterErrors: &types.Diagnostics{
+				FilePath: "test.go",
+				Items:    []*types.Diagnostic{},
 			},
 			wantLen: 0,
 		},
 		{
 			name: "single error",
-			linterErrors: &types.LinterErrors{
-				RelativeWorkspacePath: "test.go",
-				Errors: []*types.LinterError{
+			linterErrors: &types.Diagnostics{
+				FilePath: "test.go",
+				Items: []*types.Diagnostic{
 					{
 						Message: "undefined variable",
 						Source:  "go",
@@ -113,8 +115,8 @@ func TestFormatDiagnostics(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := &Provider{limits: engine.DefaultContextLimits()}
-			result := p.formatDiagnostics(tt.linterErrors)
-			assert.Equal(t, tt.wantLen, len(result), "chunk count")
+			result := p.buildEditorDiagnostics(tt.linterErrors)
+			assert.Equal(t, tt.wantLen, len(result), "diagnostics count")
 		})
 	}
 }

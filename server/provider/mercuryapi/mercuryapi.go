@@ -61,6 +61,7 @@ import (
 	"cursortab/engine"
 	"cursortab/logger"
 	"cursortab/metrics"
+	"cursortab/provider"
 	"cursortab/types"
 	"cursortab/utils"
 )
@@ -392,7 +393,7 @@ func buildPrompt(
 	cursorRow, cursorCol int, // 1-indexed row, 0-indexed col
 	diffHistories []*types.FileDiffHistory,
 	recentSnapshots []*types.RecentBufferSnapshot,
-	diagnostics *types.LinterErrors,
+	diagnostics *types.Diagnostics,
 	treesitter *types.TreesitterContext,
 	gitDiff *types.GitDiffContext,
 ) string {
@@ -411,20 +412,11 @@ func buildPrompt(
 		}
 		sb.WriteString(RecentlyViewedSnippetEnd)
 	}
-	if diagnostics != nil && len(diagnostics.Errors) > 0 {
+	if diagText := provider.FormatDiagnosticsText(diagnostics); diagText != "" {
 		sb.WriteString(RecentlyViewedSnippetStart)
 		sb.WriteString(CodeSnippetFilePathPrefix)
 		sb.WriteString("diagnostics\n")
-		for _, err := range diagnostics.Errors {
-			if err.Range != nil {
-				fmt.Fprintf(&sb, "line %d: ", err.Range.StartLine)
-			}
-			fmt.Fprintf(&sb, "[%s] %s", err.Severity, err.Message)
-			if err.Source != "" {
-				fmt.Fprintf(&sb, " (source: %s)", err.Source)
-			}
-			sb.WriteString("\n")
-		}
+		sb.WriteString(diagText)
 		sb.WriteString(RecentlyViewedSnippetEnd)
 	}
 	if treesitter != nil {

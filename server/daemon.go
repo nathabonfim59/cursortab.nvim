@@ -66,7 +66,7 @@ func NewDaemon(config Config) (*Daemon, error) {
 		CompletionPath:      config.Provider.CompletionPath,
 		CompletionTimeout:   config.Provider.CompletionTimeout,
 		PrivacyMode:         config.Provider.PrivacyMode,
-		Version:             "0.7.7", // AUTO-UPDATED by release workflow
+		Version:             "0.7.8", // AUTO-UPDATED by release workflow
 		EditorVersion:       config.EditorVersion,
 		EditorOS:            config.EditorOS,
 		StateDir:            config.StateDir,
@@ -74,9 +74,11 @@ func NewDaemon(config Config) (*Daemon, error) {
 	}
 
 	providerConfig.FIMTokens = types.FIMTokenConfig{
-		Prefix: config.Provider.FIMTokens.Prefix,
-		Suffix: config.Provider.FIMTokens.Suffix,
-		Middle: config.Provider.FIMTokens.Middle,
+		Prefix:   config.Provider.FIMTokens.Prefix,
+		Suffix:   config.Provider.FIMTokens.Suffix,
+		Middle:   config.Provider.FIMTokens.Middle,
+		RepoName: config.Provider.FIMTokens.RepoName,
+		FileSep:  config.Provider.FIMTokens.FileSep,
 	}
 
 	buf := buffer.New(buffer.Config{

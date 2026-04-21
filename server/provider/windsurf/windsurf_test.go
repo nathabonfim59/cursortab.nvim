@@ -19,6 +19,8 @@ func makeRequest(lines []string, cursorRow, cursorCol int) *types.CompletionRequ
 
 func makeRange(startRow, endRow, endCol string) windsurfResponseRange {
 	return windsurfResponseRange{
+		StartOffset: "0",
+		EndOffset:   "0",
 		StartPosition: struct {
 			Row string `json:"row"`
 		}{Row: startRow},
@@ -27,6 +29,13 @@ func makeRange(startRow, endRow, endCol string) windsurfResponseRange {
 			Col string `json:"col"`
 		}{Row: endRow, Col: endCol},
 	}
+}
+
+func makeOffsetRange(startOffset, endOffset, startRow, endRow, endCol string) windsurfResponseRange {
+	r := makeRange(startRow, endRow, endCol)
+	r.StartOffset = startOffset
+	r.EndOffset = endOffset
+	return r
 }
 
 func TestConvertResponse_EmptyItems(t *testing.T) {
@@ -61,7 +70,7 @@ func TestConvertSingleItem_SingleLineReplacement(t *testing.T) {
 			CompletionID: "abc123",
 			Text:         "hello world",
 		},
-		Range: makeRange("0", "0", "5"),
+		Range: makeOffsetRange("0", "5", "0", "0", "5"),
 	}
 	req := makeRequest([]string{"hello"}, 1, 5)
 
@@ -79,7 +88,7 @@ func TestConvertSingleItem_SingleLineWithSuffix(t *testing.T) {
 			CompletionID: "abc123",
 			Text:         "goodbye",
 		},
-		Range: makeRange("0", "0", "5"),
+		Range: makeOffsetRange("0", "5", "0", "0", "5"),
 	}
 	req := makeRequest([]string{"hello world"}, 1, 5)
 
@@ -95,7 +104,7 @@ func TestConvertSingleItem_MultiLineReplacement(t *testing.T) {
 			CompletionID: "abc123",
 			Text:         "new line 1\nnew line 2\nnew line 3",
 		},
-		Range: makeRange("1", "3", "5"),
+		Range: makeOffsetRange("6", "20", "1", "3", "5"),
 	}
 	req := makeRequest([]string{"line0", "old1", "old2", "old3", "line4"}, 2, 0)
 
@@ -113,7 +122,7 @@ func TestConvertSingleItem_NoOp(t *testing.T) {
 			CompletionID: "abc123",
 			Text:         "hello",
 		},
-		Range: makeRange("0", "0", "5"),
+		Range: makeOffsetRange("0", "5", "0", "0", "5"),
 	}
 	req := makeRequest([]string{"hello"}, 1, 5)
 
@@ -128,7 +137,7 @@ func TestConvertSingleItem_StartLineOutOfBounds(t *testing.T) {
 			CompletionID: "abc123",
 			Text:         "something",
 		},
-		Range: makeRange("99", "99", "0"),
+		Range: makeOffsetRange("999", "999", "99", "99", "0"),
 	}
 	req := makeRequest([]string{"line1", "line2"}, 1, 0)
 
@@ -143,7 +152,7 @@ func TestConvertSingleItem_EmptyBuffer(t *testing.T) {
 			CompletionID: "abc123",
 			Text:         "package main",
 		},
-		Range: makeRange("0", "0", "0"),
+		Range: makeOffsetRange("0", "0", "0", "0", "0"),
 	}
 	req := makeRequest([]string{""}, 1, 0)
 
@@ -159,7 +168,7 @@ func TestConvertSingleItem_EmptyText(t *testing.T) {
 			CompletionID: "abc123",
 			Text:         "",
 		},
-		Range: makeRange("0", "0", "5"),
+		Range: makeOffsetRange("0", "5", "0", "0", "5"),
 	}
 	req := makeRequest([]string{"hello"}, 1, 5)
 
@@ -177,7 +186,7 @@ func TestConvertResponse_MetricsInfo(t *testing.T) {
 					CompletionID: "comp-id-1",
 					Text:         "new text",
 				},
-				Range: makeRange("0", "0", "4"),
+				Range: makeOffsetRange("0", "3", "0", "0", "4"),
 			},
 		},
 	}
@@ -188,6 +197,38 @@ func TestConvertResponse_MetricsInfo(t *testing.T) {
 	assert.Len(t, 1, resp.Completions, "completions")
 	assert.NotNil(t, resp.MetricsInfo, "metricsInfo")
 	assert.Equal(t, "comp-id-1", resp.MetricsInfo.ID, "metricsInfo.ID")
+}
+
+func TestBuildCompletionText_SkipsInlineMask(t *testing.T) {
+	p := &Provider{}
+	doc := "abcdef\n"
+	item := windsurfCompletionItem{
+		CompletionParts: []windsurfCompletionPart{
+			{Text: "X", Offset: "3", Type: "COMPLETION_PART_TYPE_INLINE"},
+			{Text: "Xrest", Offset: "3", Type: "COMPLETION_PART_TYPE_INLINE_MASK"},
+		},
+	}
+
+	got := p.buildCompletionText(item, doc, 0, 6)
+	assert.Equal(t, "abcXdef", got, "buildCompletionText should skip INLINE_MASK parts")
+}
+
+func TestConvertSingleItem_CompletionParts_AppendsSuffix(t *testing.T) {
+	p := &Provider{}
+	item := windsurfCompletionItem{
+		Completion: windsurfCompletion{
+			CompletionID: "abc",
+		},
+		Range: makeOffsetRange("0", "3", "0", "0", "3"),
+		CompletionParts: []windsurfCompletionPart{
+			{Text: "X", Offset: "3", Type: "COMPLETION_PART_TYPE_INLINE"},
+		},
+	}
+
+	req := makeRequest([]string{"abcdef"}, 1, 3)
+	comp := p.convertSingleItem(item, req, 0)
+	assert.NotNil(t, comp, "completion should not be nil")
+	assert.Equal(t, []string{"abcXdef"}, comp.Lines, "suffix should be appended")
 }
 
 func TestResolveLanguage(t *testing.T) {
@@ -225,11 +266,57 @@ func TestConvertSingleItem_ColOutOfBounds(t *testing.T) {
 			CompletionID: "abc123",
 			Text:         "more",
 		},
-		Range: makeRange("0", "0", "200"),
+		Range: makeOffsetRange("0", "5", "0", "0", "200"),
 	}
 	req := makeRequest([]string{"short"}, 1, 5)
 
 	comp := p.convertSingleItem(item, req, 0)
 	assert.NotNil(t, comp, "completion")
-	assert.Equal(t, []string{"more"}, comp.Lines, "lines with clamped col")
+	assert.Equal(t, []string{"more"}, comp.Lines, "lines with offset-based replacement")
+}
+
+func TestConvertSingleItem_ReconstructsFromCompletionParts(t *testing.T) {
+	p := &Provider{}
+	item := windsurfCompletionItem{
+		Completion: windsurfCompletion{
+			CompletionID: "abc123",
+			Text:         "ignored fallback",
+		},
+		Range: makeOffsetRange("0", "12", "0", "0", "12"),
+		CompletionParts: []windsurfCompletionPart{
+			{
+				Text:   "MIDDLE",
+				Offset: "6",
+				Type:   "COMPLETION_PART_TYPE_INLINE",
+			},
+		},
+	}
+	req := makeRequest([]string{"prefixsuffix"}, 1, 6)
+
+	comp := p.convertSingleItem(item, req, 0)
+	assert.NotNil(t, comp, "completion")
+	assert.Equal(t, []string{"prefixMIDDLEsuffix"}, comp.Lines, "reconstructed lines")
+}
+
+func TestConvertSingleItem_ReconstructsBlockCompletionParts(t *testing.T) {
+	p := &Provider{}
+	item := windsurfCompletionItem{
+		Completion: windsurfCompletion{
+			CompletionID: "abc123",
+			Text:         "ignored fallback",
+		},
+		Range: makeOffsetRange("0", "10", "0", "0", "10"),
+		CompletionParts: []windsurfCompletionPart{
+			{
+				Text:   "\twork()\n",
+				Offset: "9",
+				Type:   windsurfBlockPartType,
+			},
+		},
+	}
+	req := makeRequest([]string{"if true {}"}, 1, 9)
+
+	comp := p.convertSingleItem(item, req, 0)
+	assert.NotNil(t, comp, "completion")
+	assert.Equal(t, []string{"if true {", "\twork()", "}"}, comp.Lines, "reconstructed block completion")
 }

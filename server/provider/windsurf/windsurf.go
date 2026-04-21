@@ -91,6 +91,9 @@ import (
 	"cursortab/types"
 )
 
+const windsurfBlockPartType = "COMPLETION_PART_TYPE_BLOCK"
+const windsurfInlineMaskPartType = "COMPLETION_PART_TYPE_INLINE_MASK"
+
 var languageEnum = map[string]int{
 	"unspecified":  0,
 	"c":            1,
@@ -456,25 +459,18 @@ func (p *Provider) convertResponse(wsResp *windsurfResponse, req *types.Completi
 }
 
 func (p *Provider) convertSingleItem(item windsurfCompletionItem, req *types.CompletionRequest, idx int) *types.Completion {
-	startRow, _ := strconv.Atoi(item.Range.StartPosition.Row)
-	endRow, _ := strconv.Atoi(item.Range.EndPosition.Row)
-
-	startLine := startRow + 1
-	endLine := endRow + 1
-
-	if startLine < 1 || startLine > len(req.Lines)+1 {
-		logger.Debug("windsurf: item %d start line %d out of bounds", idx, startLine)
+	documentText := buildDocumentText(req.Lines)
+	startOffset, endOffset, ok := p.resolveItemOffsets(item, idx, len(documentText))
+	if !ok {
 		return nil
 	}
 
-	if endLine > len(req.Lines) {
-		endLine = len(req.Lines)
-	}
-	if endLine < startLine {
-		endLine = startLine
+	startLine, endLine, ok := p.resolveReplacementLines(item, req, startOffset, endOffset, documentText, idx)
+	if !ok {
+		return nil
 	}
 
-	completionText := item.Completion.Text
+	completionText := p.buildCompletionText(item, documentText, startOffset, endOffset)
 	if completionText == "" {
 		logger.Debug("windsurf: item %d has empty completion text", idx)
 		return nil
@@ -482,14 +478,15 @@ func (p *Provider) convertSingleItem(item windsurfCompletionItem, req *types.Com
 
 	newLines := strings.Split(completionText, "\n")
 
+	// Always append the suffix from the original line after the completion
+	// range. When completion parts are present we skip any INLINE_MASK parts
+	// above, so the suffix must be preserved here to avoid truncation of the
+	// line tail.
 	endCol, _ := strconv.Atoi(item.Range.EndPosition.Col)
 	if endCol > 0 && endLine >= 1 && endLine <= len(req.Lines) {
 		lastOrigLine := req.Lines[endLine-1]
-		if endCol < len(lastOrigLine) {
-			lineSuffix := lastOrigLine[endCol:]
-			if len(newLines) > 0 {
-				newLines[len(newLines)-1] += lineSuffix
-			}
+		if endCol < len(lastOrigLine) && len(newLines) > 0 {
+			newLines[len(newLines)-1] += lastOrigLine[endCol:]
 		}
 	}
 
@@ -506,6 +503,124 @@ func (p *Provider) convertSingleItem(item windsurfCompletionItem, req *types.Com
 		EndLineInc: endLine,
 		Lines:      newLines,
 	}
+}
+
+func buildDocumentText(lines []string) string {
+	if len(lines) == 0 {
+		return ""
+	}
+
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func (p *Provider) resolveItemOffsets(item windsurfCompletionItem, idx, documentLen int) (int, int, bool) {
+	startOffset, startErr := strconv.Atoi(item.Range.StartOffset)
+	endOffset, endErr := strconv.Atoi(item.Range.EndOffset)
+	if startErr != nil || endErr != nil {
+		logger.Debug("windsurf: item %d missing valid offsets start=%q end=%q", idx, item.Range.StartOffset, item.Range.EndOffset)
+		return 0, 0, false
+	}
+
+	if startOffset < 0 || endOffset < startOffset || endOffset > documentLen {
+		logger.Debug("windsurf: item %d offsets out of bounds start=%d end=%d len=%d", idx, startOffset, endOffset, documentLen)
+		return 0, 0, false
+	}
+
+	return startOffset, endOffset, true
+}
+
+func (p *Provider) resolveReplacementLines(item windsurfCompletionItem, req *types.CompletionRequest, startOffset, endOffset int, documentText string, idx int) (int, int, bool) {
+	startLine, _ := byteOffsetToLineCol(documentText, startOffset)
+	endLine, endCol := byteOffsetToLineCol(documentText, endOffset)
+
+	if endOffset > startOffset && endCol == 0 && endLine > startLine {
+		endLine--
+	}
+
+	if startLine < 1 || startLine > len(req.Lines)+1 {
+		logger.Debug("windsurf: item %d start line %d out of bounds", idx, startLine)
+		return 0, 0, false
+	}
+
+	if len(req.Lines) == 0 {
+		return 1, 1, true
+	}
+
+	if startLine > len(req.Lines) {
+		startLine = len(req.Lines)
+	}
+	if endLine > len(req.Lines) {
+		endLine = len(req.Lines)
+	}
+	if endLine < startLine {
+		endLine = startLine
+	}
+
+	_ = item
+	return startLine, endLine, true
+}
+
+func (p *Provider) buildCompletionText(item windsurfCompletionItem, documentText string, startOffset, endOffset int) string {
+	if len(item.CompletionParts) == 0 {
+		return item.Completion.Text
+	}
+
+	var b strings.Builder
+	cur := startOffset
+
+	for _, part := range item.CompletionParts {
+		// Skip inline-mask parts: these are display-only masks that show the
+		// complete visible line (insert + suffix). They should not be treated as
+		// additional inserted text, otherwise the preview duplicates content.
+		if part.Type == windsurfInlineMaskPartType {
+			curOff, _ := strconv.Atoi(part.Offset)
+			if curOff > cur {
+				// advance cur to avoid re-including replaced content
+				cur = curOff
+			}
+			continue
+		}
+		offset, err := strconv.Atoi(part.Offset)
+		if err != nil {
+			continue
+		}
+		if offset < cur {
+			offset = cur
+		}
+		if offset > endOffset {
+			offset = endOffset
+		}
+
+		b.WriteString(documentText[cur:offset])
+		if part.Type == windsurfBlockPartType {
+			b.WriteByte('\n')
+		}
+		b.WriteString(part.Text)
+		cur = offset
+	}
+
+	b.WriteString(documentText[cur:endOffset])
+	return b.String()
+}
+
+func byteOffsetToLineCol(text string, offset int) (int, int) {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(text) {
+		offset = len(text)
+	}
+
+	line := 1
+	lineStart := 0
+	for i := 0; i < offset; i++ {
+		if text[i] == '\n' {
+			line++
+			lineStart = i + 1
+		}
+	}
+
+	return line, offset - lineStart
 }
 
 func resolveLanguage(filePath string) string {

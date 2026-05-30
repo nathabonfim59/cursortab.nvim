@@ -1,11 +1,55 @@
 package windsurf
 
 import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"cursortab/assert"
+	"cursortab/buffer"
 	"cursortab/types"
 )
+
+type testWindsurfInfoProvider struct {
+	info *buffer.WindsurfInfo
+}
+
+func (p testWindsurfInfoProvider) GetWindsurfInfo() (*buffer.WindsurfInfo, error) {
+	return p.info, nil
+}
+
+type testRoundTripper struct {
+	request *http.Request
+	body    string
+}
+
+func (rt *testRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	rt.request = req
+	rt.body = string(body)
+
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body: io.NopCloser(strings.NewReader(`{
+			"completionId": "jump-id",
+			"suggestion": {
+				"case": "tabJump",
+				"value": {
+					"path": "/test/main.go",
+					"jumpPosition": { "row": "4", "col": "0" }
+				}
+			}
+		}`)),
+		Request: req,
+	}, nil
+}
 
 func makeRequest(lines []string, cursorRow, cursorCol int) *types.CompletionRequest {
 	return &types.CompletionRequest{
@@ -36,6 +80,36 @@ func makeOffsetRange(startOffset, endOffset, startRow, endRow, endCol string) wi
 	r.StartOffset = startOffset
 	r.EndOffset = endOffset
 	return r
+}
+
+func TestGetCompletion_UsesSupercompleteEndpointForCursorTarget(t *testing.T) {
+	rt := &testRoundTripper{}
+	p := NewProvider(testWindsurfInfoProvider{info: &buffer.WindsurfInfo{
+		Healthy:   true,
+		Port:      12345,
+		APIKey:    "api-key",
+		CSRFToken: "csrf-token",
+	}})
+	p.SetHTTPTransport(rt)
+
+	resp, err := p.GetCompletion(context.Background(), makeRequest([]string{
+		"package main",
+		"",
+		"func main() {}",
+		"",
+		"func helper() {}",
+	}, 3, 0))
+
+	assert.NoError(t, err, "GetCompletion error")
+	assert.NotNil(t, rt.request, "request")
+	assert.Equal(t, "/exa.language_server_pb.LanguageServerService/HandleStreamingTabV2", rt.request.URL.Path, "endpoint")
+	assert.Equal(t, "csrf-token", rt.request.Header.Get("x-codeium-csrf-token"), "csrf header")
+	assert.True(t, strings.Contains(rt.body, `"disable_tab_jump":false`), "tab jump enabled")
+	assert.Len(t, 0, resp.Completions, "completions")
+	assert.NotNil(t, resp.CursorTarget, "cursor target")
+	assert.Equal(t, int32(5), resp.CursorTarget.LineNumber, "cursor target line")
+	assert.True(t, resp.CursorTarget.ShouldRetrigger, "should retrigger")
+	assert.Equal(t, "jump-id", resp.MetricsInfo.ID, "metrics ID")
 }
 
 func TestConvertResponse_EmptyItems(t *testing.T) {
@@ -319,4 +393,90 @@ func TestConvertSingleItem_ReconstructsBlockCompletionParts(t *testing.T) {
 	comp := p.convertSingleItem(item, req, 0)
 	assert.NotNil(t, comp, "completion")
 	assert.Equal(t, []string{"if true {", "\twork()", "}"}, comp.Lines, "reconstructed block completion")
+}
+
+func TestConvertSupercompleteResponse_MultiLineDiff(t *testing.T) {
+	p := &Provider{}
+	req := makeRequest([]string{
+		"package main",
+		"",
+		"func main() {",
+		"\t",
+		"}",
+	}, 4, 1)
+	wsResp := &windsurfSupercompleteResponse{CompletionID: "super-id"}
+	wsResp.Suggestion.Case = "diff"
+	wsResp.Suggestion.Value.SelectionStartLine = 3
+	wsResp.Suggestion.Value.SelectionEndLine = 4
+	wsResp.Suggestion.Value.CharacterDiff.Changes = []windsurfDiffChange{
+		{Type: "DIFF_CHANGE_TYPE_UNCHANGED", Text: "\t"},
+		{Type: "DIFF_CHANGE_TYPE_INSERT", Text: "fmt.Println(\"hello\")\n"},
+	}
+
+	resp := p.convertSupercompleteResponse(wsResp, req)
+	assert.Len(t, 1, resp.Completions, "completions")
+	assert.Equal(t, []string{"\tfmt.Println(\"hello\")"}, resp.Completions[0].Lines, "lines")
+	assert.Equal(t, "super-id", resp.MetricsInfo.ID, "metrics ID")
+}
+
+func TestConvertSupercompleteResponse_TopLevelDiff(t *testing.T) {
+	p := &Provider{}
+	req := makeRequest([]string{
+		"package main",
+		"",
+		"func main() {",
+		"\t",
+		"}",
+	}, 4, 1)
+	var wsResp windsurfSupercompleteResponse
+	err := json.Unmarshal([]byte(`{
+		"completionId": "super-id",
+		"diff": {
+			"selectionStartLine": "3",
+			"selectionEndLine": "4",
+			"characterDiff": {
+				"changes": [
+					{ "type": "DIFF_CHANGE_TYPE_UNCHANGED", "text": "\t" },
+					{ "type": "DIFF_CHANGE_TYPE_INSERT", "text": "fmt.Println(\"hello\")\n" }
+				]
+			},
+			"cursorPosition": { "row": "4", "col": "0" }
+		}
+	}`), &wsResp)
+	assert.NoError(t, err, "unmarshal")
+
+	resp := p.convertSupercompleteResponse(&wsResp, req)
+	assert.Len(t, 1, resp.Completions, "completions")
+	assert.Equal(t, []string{"\tfmt.Println(\"hello\")"}, resp.Completions[0].Lines, "lines")
+	assert.NotNil(t, resp.CursorTarget, "cursor target")
+	assert.Equal(t, int32(5), resp.CursorTarget.LineNumber, "cursor target line")
+	assert.Equal(t, "super-id", resp.MetricsInfo.ID, "metrics ID")
+}
+
+func TestConvertSupercompleteResponse_DiffCursorTargetRetriggers(t *testing.T) {
+	p := &Provider{}
+	req := makeRequest([]string{
+		"package main",
+		"",
+		"func main() {",
+		"\tfmt.Println(\"hello\")",
+		"}",
+		"",
+		"func helper() {}",
+	}, 4, 1)
+	wsResp := &windsurfSupercompleteResponse{}
+	wsResp.Suggestion.Case = "diff"
+	wsResp.Suggestion.Value.SelectionStartLine = 3
+	wsResp.Suggestion.Value.SelectionEndLine = 4
+	wsResp.Suggestion.Value.CursorPosition = &windsurfResponsePos{Row: 6, Col: 0}
+	wsResp.Suggestion.Value.CharacterDiff.Changes = []windsurfDiffChange{
+		{Type: "DIFF_CHANGE_TYPE_UNCHANGED", Text: "\tfmt.Println(\"hello\")\n"},
+		{Type: "DIFF_CHANGE_TYPE_INSERT", Text: "\thelper()\n"},
+	}
+
+	resp := p.convertSupercompleteResponse(wsResp, req)
+	assert.Len(t, 1, resp.Completions, "completions")
+	assert.NotNil(t, resp.CursorTarget, "cursor target")
+	assert.Equal(t, int32(7), resp.CursorTarget.LineNumber, "line number")
+	assert.True(t, resp.CursorTarget.ShouldRetrigger, "should retrigger")
 }

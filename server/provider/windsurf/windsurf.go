@@ -78,6 +78,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -91,6 +92,26 @@ import (
 	"cursortab/metrics"
 	"cursortab/types"
 )
+
+type windsurfInt int
+
+func (i *windsurfInt) UnmarshalJSON(data []byte) error {
+	var n int
+	if err := json.Unmarshal(data, &n); err == nil {
+		*i = windsurfInt(n)
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return err
+	}
+	*i = windsurfInt(n)
+	return nil
+}
 
 // InfoProvider is the minimum interface the Windsurf provider needs from the
 // buffer. *buffer.NvimBuffer satisfies this via duck typing. The eval harness
@@ -263,6 +284,7 @@ type windsurfDocument struct {
 	Text           string      `json:"text"`
 	EditorLanguage string      `json:"editor_language"`
 	Language       int         `json:"language"`
+	CursorOffset   int         `json:"cursor_offset,omitempty"`
 	CursorPosition windsurfPos `json:"cursor_position"`
 	AbsoluteURI    string      `json:"absolute_uri"`
 	WorkspaceURI   string      `json:"workspace_uri"`
@@ -278,6 +300,67 @@ type windsurfRequest struct {
 type windsurfAcceptRequest struct {
 	Metadata     windsurfMetadata `json:"metadata"`
 	CompletionID string           `json:"completion_id"`
+}
+
+type windsurfSupercompleteRequest struct {
+	Metadata                      windsurfMetadata      `json:"metadata"`
+	Document                      windsurfDocument      `json:"document"`
+	EditorOptions                 windsurfEditorOptions `json:"editor_options"`
+	SupercompleteTriggerCondition string                `json:"supercomplete_trigger_condition"`
+	DisableTabJump                bool                  `json:"disable_tab_jump"`
+}
+
+type windsurfSupercompleteResponse struct {
+	CompletionID string `json:"completionId"`
+	PromptID     string `json:"promptId"`
+	RequestUID   string `json:"requestUid"`
+	RawJSON      string `json:"-"`
+	FilterReason *struct {
+		Reason string `json:"reason"`
+	} `json:"filterReason"`
+	Diff       *windsurfSupercompleteDiff    `json:"diff"`
+	TabJump    *windsurfSupercompleteTabJump `json:"tabJump"`
+	Suggestion struct {
+		Case  string `json:"case"`
+		Value struct {
+			SelectionStartLine windsurfInt           `json:"selectionStartLine"`
+			SelectionEndLine   windsurfInt           `json:"selectionEndLine"`
+			CharacterDiff      windsurfCharacterDiff `json:"characterDiff"`
+			CursorPosition     *windsurfResponsePos  `json:"cursorPosition"`
+			Path               string                `json:"path"`
+			JumpPosition       *windsurfResponsePos  `json:"jumpPosition"`
+		} `json:"value"`
+		Diff    *windsurfSupercompleteDiff    `json:"diff"`
+		TabJump *windsurfSupercompleteTabJump `json:"tabJump"`
+	} `json:"suggestion"`
+}
+
+type windsurfSupercompleteDiff struct {
+	SelectionStartLine windsurfInt           `json:"selectionStartLine"`
+	SelectionEndLine   windsurfInt           `json:"selectionEndLine"`
+	CharacterDiff      windsurfCharacterDiff `json:"characterDiff"`
+	CursorPosition     *windsurfResponsePos  `json:"cursorPosition"`
+	Path               string                `json:"path"`
+}
+
+type windsurfSupercompleteTabJump struct {
+	Path         string               `json:"path"`
+	JumpPosition *windsurfResponsePos `json:"jumpPosition"`
+	IsImport     bool                 `json:"isImport"`
+}
+
+type windsurfResponsePos struct {
+	Row windsurfInt `json:"row"`
+	Col windsurfInt `json:"col"`
+}
+
+type windsurfCharacterDiff struct {
+	Changes []windsurfDiffChange `json:"changes"`
+}
+
+type windsurfDiffChange struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
 
 type Provider struct {
@@ -329,6 +412,24 @@ func (p *Provider) GetCompletion(ctx context.Context, req *types.CompletionReque
 		return p.emptyResponse(), nil
 	}
 
+	if info.CSRFToken != "" {
+		resp := p.getSupercomplete(ctx, req, info)
+		if len(resp.Completions) > 0 || resp.CursorTarget != nil {
+			return resp, nil
+		}
+	} else {
+		candidates := discoverWindsurfIDEInfos(info.APIKey)
+		if len(candidates) > 0 {
+			logger.Debug("windsurf: trying %d Windsurf IDE supercomplete candidates", len(candidates))
+		}
+		for _, candidate := range candidates {
+			resp := p.getSupercomplete(ctx, req, candidate)
+			if len(resp.Completions) > 0 || resp.CursorTarget != nil {
+				return resp, nil
+			}
+		}
+	}
+
 	lineEnding := "\n"
 	language := resolveLanguage(req.FilePath)
 
@@ -339,6 +440,7 @@ func (p *Provider) GetCompletion(ctx context.Context, req *types.CompletionReque
 	if len(req.Lines) > 0 {
 		text += lineEnding
 	}
+	cursorOffset := cursorByteOffset(req.Lines, req.CursorRow, req.CursorCol)
 
 	reqID := p.nextRequestID()
 	wsReq := windsurfRequest{
@@ -357,7 +459,8 @@ func (p *Provider) GetCompletion(ctx context.Context, req *types.CompletionReque
 		Document: windsurfDocument{
 			Text:           text,
 			EditorLanguage: language,
-			Language:       LanguageEnum(language),
+			Language:       languageEnum[language],
+			CursorOffset:   cursorOffset,
 			CursorPosition: windsurfPos{
 				Row: req.CursorRow - 1,
 				Col: req.CursorCol,
@@ -408,6 +511,89 @@ func (p *Provider) GetCompletion(ctx context.Context, req *types.CompletionReque
 	}
 
 	return p.convertResponse(&wsResp, req)
+}
+
+func (p *Provider) getSupercomplete(ctx context.Context, req *types.CompletionRequest, info *buffer.WindsurfInfo) *types.CompletionResponse {
+	lineEnding := "\n"
+	language := resolveLanguage(req.FilePath)
+
+	absFilePath, _ := filepath.Abs(req.FilePath)
+	absWorkspacePath, _ := filepath.Abs(req.WorkspacePath)
+	text := buildDocumentText(req.Lines)
+
+	p.reqCounter++
+	wsReq := windsurfSupercompleteRequest{
+		Metadata: windsurfMetadata{
+			APIKey:           info.APIKey,
+			IDEName:          "windsurf",
+			IDEVersion:       "2.3.9",
+			ExtensionName:    "windsurf",
+			ExtensionVersion: "1.48.2",
+			RequestID:        p.reqCounter,
+		},
+		Document: windsurfDocument{
+			Text:           text,
+			EditorLanguage: language,
+			Language:       languageEnum[language],
+			CursorOffset:   cursorByteOffset(req.Lines, req.CursorRow, req.CursorCol),
+			CursorPosition: windsurfPos{
+				Row: req.CursorRow - 1,
+				Col: req.CursorCol,
+			},
+			AbsoluteURI:  "file://" + absFilePath,
+			WorkspaceURI: "file://" + absWorkspacePath,
+			LineEnding:   lineEnding,
+		},
+		EditorOptions: windsurfEditorOptions{
+			TabSize:      4,
+			InsertSpaces: true,
+		},
+		SupercompleteTriggerCondition: "SUPERCOMPLETE_TRIGGER_CONDITION_TYPING",
+		DisableTabJump:                false,
+	}
+
+	body, err := json.Marshal(wsReq)
+	if err != nil {
+		logger.Debug("windsurf: failed to marshal supercomplete request: %v", err)
+		return p.emptyResponse()
+	}
+
+	url := fmt.Sprintf("http://127.0.0.1:%d/exa.language_server_pb.LanguageServerService/HandleStreamingTabV2", info.Port)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		logger.Debug("windsurf: failed to create supercomplete request: %v", err)
+		return p.emptyResponse()
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("x-codeium-csrf-token", info.CSRFToken)
+
+	resp, err := p.httpClient.Do(httpReq)
+	if err != nil {
+		logger.Debug("windsurf: supercomplete request failed: %v", err)
+		return p.emptyResponse()
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		logger.Debug("windsurf: supercomplete non-200 response %d: %s", resp.StatusCode, string(respBody))
+		return p.emptyResponse()
+	}
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		logger.Debug("windsurf: failed to read supercomplete response: %v", err)
+		return p.emptyResponse()
+	}
+
+	var wsResp windsurfSupercompleteResponse
+	if err := json.Unmarshal(respBody, &wsResp); err != nil {
+		logger.Debug("windsurf: failed to decode supercomplete response: %v", err)
+		return p.emptyResponse()
+	}
+	wsResp.RawJSON = string(respBody)
+
+	return p.convertSupercompleteResponse(&wsResp, req)
 }
 
 func (p *Provider) SendMetric(ctx context.Context, event metrics.Event) {
@@ -489,6 +675,54 @@ func (p *Provider) convertResponse(wsResp *windsurfResponse, req *types.Completi
 	}, nil
 }
 
+func (p *Provider) convertSupercompleteResponse(wsResp *windsurfSupercompleteResponse, req *types.CompletionRequest) *types.CompletionResponse {
+	if wsResp.FilterReason != nil {
+		logger.Debug("windsurf: supercomplete filtered: %s", wsResp.FilterReason.Reason)
+		return p.emptyResponse()
+	}
+
+	target := wsResp.cursorTarget(req)
+	if target != nil && wsResp.hasTabJump() {
+		return &types.CompletionResponse{
+			Completions:  []*types.Completion{},
+			CursorTarget: target,
+			MetricsInfo:  supercompleteMetricsInfo(wsResp),
+		}
+	}
+
+	if !wsResp.hasDiff() {
+		logger.Debug("windsurf: supercomplete unsupported suggestion case: %s body=%s", wsResp.Suggestion.Case, logPreview(wsResp.RawJSON))
+		return p.emptyResponse()
+	}
+
+	finalLines := splitDocumentLines(buildSupercompleteFinalText(req.Lines, wsResp))
+	if slices.Equal(finalLines, req.Lines) {
+		return p.emptyResponse()
+	}
+
+	startLine, endLine, newLines := changedLineRange(req.Lines, finalLines)
+	if len(newLines) == 0 {
+		newLines = []string{""}
+	}
+
+	return &types.CompletionResponse{
+		Completions: []*types.Completion{{
+			StartLine:  startLine,
+			EndLineInc: endLine,
+			Lines:      newLines,
+		}},
+		CursorTarget: target,
+		MetricsInfo:  supercompleteMetricsInfo(wsResp),
+	}
+}
+
+func supercompleteMetricsInfo(wsResp *windsurfSupercompleteResponse) *types.MetricsInfo {
+	if wsResp.CompletionID == "" {
+		return nil
+	}
+	return &types.MetricsInfo{ID: wsResp.CompletionID}
+}
+
 func (p *Provider) convertSingleItem(item windsurfCompletionItem, req *types.CompletionRequest, idx int) *types.Completion {
 	documentText := buildDocumentText(req.Lines)
 	startOffset, endOffset, ok := p.resolveItemOffsets(item, idx, len(documentText))
@@ -542,6 +776,169 @@ func buildDocumentText(lines []string) string {
 	}
 
 	return strings.Join(lines, "\n") + "\n"
+}
+
+func splitDocumentLines(text string) []string {
+	text = strings.TrimSuffix(text, "\n")
+	if text == "" {
+		return []string{""}
+	}
+	return strings.Split(text, "\n")
+}
+
+func buildSupercompleteFinalText(lines []string, resp *windsurfSupercompleteResponse) string {
+	diff := resp.supercompleteDiff()
+	var replacement strings.Builder
+	for _, change := range diff.CharacterDiff.Changes {
+		if isWindsurfInsertedOrUnchanged(change.Type) {
+			replacement.WriteString(change.Text)
+		}
+	}
+
+	origLines := splitDocumentLines(buildDocumentText(lines))
+	startLine := min(int(diff.SelectionStartLine), len(origLines))
+	endLine := min(int(diff.SelectionEndLine), len(origLines))
+
+	finalLines := append([]string{}, origLines[:startLine]...)
+	if replacement.Len() > 0 {
+		finalLines = append(finalLines, splitDocumentLines(replacement.String())...)
+	}
+	if endLine < len(origLines) {
+		finalLines = append(finalLines, origLines[endLine:]...)
+	}
+	return buildDocumentText(finalLines)
+}
+
+func (r *windsurfSupercompleteResponse) supercompleteDiff() windsurfSupercompleteDiff {
+	if r.Diff != nil {
+		return *r.Diff
+	}
+	if r.Suggestion.Diff != nil {
+		return *r.Suggestion.Diff
+	}
+	return windsurfSupercompleteDiff{
+		SelectionStartLine: r.Suggestion.Value.SelectionStartLine,
+		SelectionEndLine:   r.Suggestion.Value.SelectionEndLine,
+		CharacterDiff:      r.Suggestion.Value.CharacterDiff,
+		CursorPosition:     r.Suggestion.Value.CursorPosition,
+		Path:               r.Suggestion.Value.Path,
+	}
+}
+
+func (r *windsurfSupercompleteResponse) cursorTarget(req *types.CompletionRequest) *types.CursorPredictionTarget {
+	var path string
+	var pos *windsurfResponsePos
+	if r.TabJump != nil {
+		path = r.TabJump.Path
+		pos = r.TabJump.JumpPosition
+	} else if r.Suggestion.Case == "tabJump" {
+		path = r.Suggestion.Value.Path
+		pos = r.Suggestion.Value.JumpPosition
+	} else if r.Suggestion.TabJump != nil {
+		path = r.Suggestion.TabJump.Path
+		pos = r.Suggestion.TabJump.JumpPosition
+	} else {
+		diff := r.supercompleteDiff()
+		path = diff.Path
+		pos = diff.CursorPosition
+	}
+	if pos == nil || pos.Row < 0 {
+		return nil
+	}
+
+	relativePath := path
+	if relativePath == "" {
+		relativePath = req.FilePath
+	}
+	if req.WorkspacePath != "" {
+		if rel, err := filepath.Rel(req.WorkspacePath, relativePath); err == nil && !strings.HasPrefix(rel, "..") {
+			relativePath = rel
+		}
+	}
+
+	lineNumber := int(pos.Row) + 1
+	expectedContent := ""
+	if lineNumber >= 1 && lineNumber <= len(req.Lines) {
+		expectedContent = req.Lines[lineNumber-1]
+	}
+	return &types.CursorPredictionTarget{
+		RelativePath:    relativePath,
+		LineNumber:      int32(lineNumber),
+		ExpectedContent: expectedContent,
+		ShouldRetrigger: true,
+	}
+}
+
+func (r *windsurfSupercompleteResponse) hasDiff() bool {
+	return r.Diff != nil || r.Suggestion.Diff != nil || r.Suggestion.Case == "diff"
+}
+
+func (r *windsurfSupercompleteResponse) hasTabJump() bool {
+	return r.TabJump != nil || r.Suggestion.TabJump != nil || r.Suggestion.Case == "tabJump"
+}
+
+func logPreview(s string) string {
+	const max = 1200
+	s = strings.ReplaceAll(s, "\n", "\\n")
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
+}
+
+func changedLineRange(oldLines, newLines []string) (int, int, []string) {
+	prefix := 0
+	for prefix < len(oldLines) && prefix < len(newLines) && oldLines[prefix] == newLines[prefix] {
+		prefix++
+	}
+
+	oldSuffix := len(oldLines)
+	newSuffix := len(newLines)
+	for oldSuffix > prefix && newSuffix > prefix && oldLines[oldSuffix-1] == newLines[newSuffix-1] {
+		oldSuffix--
+		newSuffix--
+	}
+
+	startLine := prefix + 1
+	endLine := oldSuffix
+	if endLine < startLine {
+		endLine = startLine
+	}
+	return startLine, endLine, newLines[prefix:newSuffix]
+}
+
+func isWindsurfInsertedOrUnchanged(changeType string) bool {
+	switch changeType {
+	case "INSERT", "DIFF_CHANGE_TYPE_INSERT", "insert", "2":
+		return true
+	case "UNCHANGED", "DIFF_CHANGE_TYPE_UNCHANGED", "unchanged", "1":
+		return true
+	default:
+		return false
+	}
+}
+
+func cursorByteOffset(lines []string, row, col int) int {
+	if row < 1 {
+		row = 1
+	}
+	if row > len(lines) {
+		row = len(lines)
+	}
+	offset := 0
+	for i := 0; i < row-1; i++ {
+		offset += len(lines[i]) + 1
+	}
+	if row >= 1 && row <= len(lines) {
+		if col < 0 {
+			col = 0
+		}
+		if col > len(lines[row-1]) {
+			col = len(lines[row-1])
+		}
+		offset += col
+	}
+	return offset
 }
 
 func (p *Provider) resolveItemOffsets(item windsurfCompletionItem, idx, documentLen int) (int, int, bool) {
@@ -689,4 +1086,114 @@ func (p *Provider) emptyResponse() *types.CompletionResponse {
 		Completions:  []*types.Completion{},
 		CursorTarget: nil,
 	}
+}
+
+func discoverWindsurfIDEInfos(apiKey string) []*buffer.WindsurfInfo {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil
+	}
+
+	var infos []*buffer.WindsurfInfo
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			continue
+		}
+
+		exe, err := os.Readlink(filepath.Join("/proc", entry.Name(), "exe"))
+		if err != nil || !strings.Contains(exe, "/windsurf/") || !strings.HasSuffix(exe, "language_server_linux_x64") {
+			continue
+		}
+
+		env, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "environ"))
+		if err != nil {
+			continue
+		}
+		csrfToken := environValue(env, "WINDSURF_CSRF_TOKEN")
+		if csrfToken == "" {
+			continue
+		}
+
+		for _, port := range processListenPorts(pid) {
+			infos = append(infos, &buffer.WindsurfInfo{
+				Healthy:   true,
+				Port:      port,
+				APIKey:    apiKey,
+				CSRFToken: csrfToken,
+			})
+		}
+	}
+	return infos
+}
+
+func environValue(env []byte, key string) string {
+	prefix := key + "="
+	for _, part := range strings.Split(string(env), "\x00") {
+		if strings.HasPrefix(part, prefix) {
+			return strings.TrimPrefix(part, prefix)
+		}
+	}
+	return ""
+}
+
+func processListenPorts(pid int) []int {
+	inodes := map[string]bool{}
+	fdDir := fmt.Sprintf("/proc/%d/fd", pid)
+	entries, err := os.ReadDir(fdDir)
+	if err != nil {
+		return nil
+	}
+	for _, entry := range entries {
+		target, err := os.Readlink(filepath.Join(fdDir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		if strings.HasPrefix(target, "socket:[") && strings.HasSuffix(target, "]") {
+			inodes[strings.TrimSuffix(strings.TrimPrefix(target, "socket:["), "]")] = true
+		}
+	}
+
+	var ports []int
+	for _, path := range []string{"/proc/net/tcp", "/proc/net/tcp6"} {
+		for _, socket := range listenSockets(path) {
+			if inodes[socket.inode] {
+				ports = append(ports, socket.port)
+			}
+		}
+	}
+	return ports
+}
+
+type listenSocket struct {
+	port  int
+	inode string
+}
+
+func listenSockets(path string) []listenSocket {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	lines := strings.Split(string(data), "\n")
+	sockets := make([]listenSocket, 0, len(lines))
+	for _, line := range lines[1:] {
+		fields := strings.Fields(line)
+		if len(fields) < 10 || fields[3] != "0A" {
+			continue
+		}
+		hostPort := strings.Split(fields[1], ":")
+		if len(hostPort) != 2 {
+			continue
+		}
+		port64, err := strconv.ParseInt(hostPort[1], 16, 32)
+		if err != nil {
+			continue
+		}
+		sockets = append(sockets, listenSocket{port: int(port64), inode: fields[9]})
+	}
+	return sockets
 }

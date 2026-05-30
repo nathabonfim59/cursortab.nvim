@@ -128,6 +128,32 @@ func TestHandleCursorTarget_Disabled(t *testing.T) {
 	assert.Nil(t, eng.cursorTarget, "cursorTarget when cursor prediction disabled")
 }
 
+func TestHandleCompletionReady_AppliesResponseCursorTarget(t *testing.T) {
+	buf := newMockBuffer()
+	buf.lines = []string{"func main() {", "\t", "}", "", "func helper() {}"}
+	buf.row = 2
+	prov := newMockProvider()
+	clock := newMockClock()
+	eng := createTestEngine(buf, prov, clock)
+
+	eng.handleCompletionReadyImpl(&types.CompletionResponse{
+		Completions: []*types.Completion{{
+			StartLine:  2,
+			EndLineInc: 2,
+			Lines:      []string{"\thelper()"},
+		}},
+		CursorTarget: &types.CursorPredictionTarget{
+			LineNumber:      5,
+			ShouldRetrigger: true,
+		},
+	})
+
+	assert.Equal(t, stateHasCompletion, eng.state, "state")
+	assert.NotNil(t, eng.cursorTarget, "cursor target")
+	assert.Equal(t, int32(5), eng.cursorTarget.LineNumber, "line number")
+	assert.True(t, eng.cursorTarget.ShouldRetrigger, "should retrigger")
+}
+
 func TestHandleCursorTarget_CloseEnough(t *testing.T) {
 	buf := newMockBuffer()
 	buf.row = 8

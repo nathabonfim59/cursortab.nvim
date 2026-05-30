@@ -80,9 +80,10 @@ func (b *NvimBuffer) RegisterCopilotHandler(handler func(reqID int64, editsJSON 
 }
 
 type WindsurfInfo struct {
-	Healthy bool
-	Port    int
-	APIKey  string
+	Healthy   bool
+	Port      int
+	APIKey    string
+	CSRFToken string
 }
 
 func (b *NvimBuffer) GetWindsurfInfo() (*WindsurfInfo, error) {

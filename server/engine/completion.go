@@ -13,6 +13,7 @@ func (e *Engine) handleCompletionReadyImpl(response *types.CompletionResponse) {
 	e.syncBuffer()
 
 	if len(response.Completions) == 0 {
+		e.cursorTarget = response.CursorTarget
 		e.handleCursorTarget()
 		return
 	}
@@ -24,6 +25,7 @@ func (e *Engine) handleCompletionReadyImpl(response *types.CompletionResponse) {
 
 	switch e.processCompletion(completion) {
 	case completionShown:
+		e.applyResponseCursorTarget(response.CursorTarget)
 		return
 	case completionSuppressed:
 		e.pendingMetricsInfo = nil
@@ -32,6 +34,23 @@ func (e *Engine) handleCompletionReadyImpl(response *types.CompletionResponse) {
 
 	e.pendingMetricsInfo = nil
 	e.handleCompletionNoChanges(completion)
+}
+
+func (e *Engine) applyResponseCursorTarget(target *types.CursorPredictionTarget) {
+	if target == nil {
+		return
+	}
+	if e.stagedCompletion != nil && len(e.stagedCompletion.Stages) > 0 {
+		last := e.stagedCompletion.Stages[len(e.stagedCompletion.Stages)-1]
+		if last != nil {
+			last.CursorTarget = target
+		}
+		if e.stagedCompletion.CurrentIdx == len(e.stagedCompletion.Stages)-1 {
+			e.cursorTarget = target
+		}
+		return
+	}
+	e.cursorTarget = target
 }
 
 // handleCompletionNoChanges handles the case where completion has no changes.
